@@ -1,31 +1,10 @@
-// components/FanChart.tsx
 import React from "react";
-import {
-  Chart as ChartJS,
-  LineElement,
-  PointElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  Filler,
-} from "chart.js";
 import { Line } from "react-chartjs-2";
+import type { ChartData, ChartOptions } from "chart.js";
 
-ChartJS.register(
-  LineElement,
-  PointElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  Filler
-);
-
-type FanChartData = {
+type MCArtifact = {
   symbol: string;
   horizon_days: number;
-  prob_up_end: number;
   median_path: [number, number][];
   bands: {
     p50: [number, number][];
@@ -36,105 +15,122 @@ type FanChartData = {
   };
 };
 
-export type FanChartProps = { data: FanChartData };
+const BLUE = "#60A5FA";         // median
+const TEAL = "#34D399";         // 80 band
+const PURPLE = "#A78BFA";       // 95 band
+const AREA80 = "rgba(52,211,153,0.15)";
+const AREA95 = "rgba(167,139,250,0.12)";
 
-export const FanChart: React.FC<FanChartProps> = ({ data }) => {
-  const labels = data.median_path.map(([t]) => `D${t}`);
+export default function FanChart({ data }: { data: MCArtifact }) {
+  const { symbol, horizon_days, median_path, bands } = data;
 
-  const arrY = (pairs: [number, number][]) => pairs.map(([, y]) => y);
+  const labels = median_path.map(([i]) => `D${i}`);
+  const yMedian = median_path.map(([, v]) => v);
+  const y80Low = bands.p80_low.map(([, v]) => v);
+  const y80High = bands.p80_high.map(([, v]) => v);
+  const y95Low = bands.p95_low.map(([, v]) => v);
+  const y95High = bands.p95_high.map(([, v]) => v);
 
-  const ds = [
-    // 95% band fill
-    {
-      label: "95% Low",
-      data: arrY(data.bands.p95_low),
-      borderColor: "rgba(0,0,0,0)",
-      backgroundColor: "rgba(59,130,246,0.08)", // soft blue
-      fill: "+1",
-      pointRadius: 0,
-      tension: 0.25,
-      order: 1,
+  const chartData: ChartData<"line"> = {
+    labels,
+    datasets: [
+      // 95% area
+      {
+        label: "95% band",
+        data: y95High,
+        borderWidth: 0,
+        backgroundColor: AREA95,
+        fill: { target: 3, above: AREA95, below: AREA95 }, // pair with 95 low (index 3)
+        pointRadius: 0,
+      },
+      // 80% area
+      {
+        label: "80% band",
+        data: y80High,
+        borderWidth: 0,
+        backgroundColor: AREA80,
+        fill: { target: 4, above: AREA80, below: AREA80 }, // pair with 80 low (index 4)
+        pointRadius: 0,
+      },
+      // 95% low (invisible line; only used as fill target)
+      { label: "_95_low", data: y95Low, borderWidth: 0, pointRadius: 0 },
+      // 80% low (invisible line; only used as fill target)
+      { label: "_80_low", data: y80Low, borderWidth: 0, pointRadius: 0 },
+      // Median line (visible)
+      {
+        label: "Median",
+        data: yMedian,
+        borderColor: BLUE,
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.15,
+      },
+    ],
+  };
+  // --- shared hover presets ---
+  const HOVER_POINTS = {
+    pointRadius: 0,          // hide points until hovered
+    pointHoverRadius: 5,     // visible pin-dot size
+    pointHitRadius: 10,      // easier to hover
+    pointHoverBorderWidth: 2,
+  };
+
+  const SHARED_HOVER_OPTIONS = {
+    interaction: { mode: "index" as const, intersect: false },
+    plugins: {
+      tooltip: {
+        mode: "index" as const,
+        intersect: false,
+        callbacks: {
+          // unified label formatting (price if it looks like a price axis)
+          label: (ctx: any) => {
+            const label = ctx.dataset?.label ?? "";
+            const y = ctx.parsed?.y;
+            if (y == null) return label;
+            // if the y-range looks like a dollar axis, format as price
+            const asPrice =
+              ctx.chart?.scales?.y?.options?.title?.text?.toLowerCase?.().includes("price");
+            const formatted = asPrice
+              ? `$${Number(y).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+              : `${Number(y).toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
+            return `${label}: ${formatted}`;
+          },
+        },
+      },
+      legend: { display: true },
     },
-    {
-      label: "95% High",
-      data: arrY(data.bands.p95_high),
-      borderColor: "rgba(0,0,0,0)",
-      backgroundColor: "rgba(59,130,246,0.08)",
-      fill: false,
-      pointRadius: 0,
-      tension: 0.25,
-      order: 1,
+    elements: { point: { radius: 0 } }, // default: no points unless hovered
+  };
+
+
+  const options: ChartOptions<"line"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { maxRotation: 0, autoSkip: true },
+        title: { display: true, text: "Days" },
+      },
+      y: {
+        grid: { color: "rgba(148,163,184,0.15)" },
+        title: { display: true, text: "Price (USD)" },
+      },
     },
-    // 80% band fill
-    {
-      label: "80% Low",
-      data: arrY(data.bands.p80_low),
-      borderColor: "rgba(0,0,0,0)",
-      backgroundColor: "rgba(59,130,246,0.16)",
-      fill: "+1",
-      pointRadius: 0,
-      tension: 0.25,
-      order: 2,
+    plugins: {
+      legend: { display: true },
+      tooltip: { enabled: true },
     },
-    {
-      label: "80% High",
-      data: arrY(data.bands.p80_high),
-      borderColor: "rgba(0,0,0,0)",
-      backgroundColor: "rgba(59,130,246,0.16)",
-      fill: false,
-      pointRadius: 0,
-      tension: 0.25,
-      order: 2,
-    },
-    // Median path
-    {
-      label: "Median",
-      data: arrY(data.median_path),
-      borderColor: "#9FE88D",
-      backgroundColor: "rgba(159,232,141,0.15)",
-      pointRadius: 0,
-      tension: 0.25,
-      order: 3,
-    },
-  ];
+  };
 
   return (
-    <div className="w-full h-[360px]">
+    <div data-chart="fan" className="relative w-full" style={{ height: 320 }}>
       <Line
-        data={{ labels, datasets: ds }}
-        options={{
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          normalized: true,
-          interaction: { mode: "nearest", intersect: false },
-          plugins: {
-            legend: {
-              display: true,
-              labels: { color: "#cbd5e1", boxWidth: 12, usePointStyle: true },
-            },
-            tooltip: {
-              enabled: true,
-              intersect: false,
-              displayColors: false,
-              callbacks: {
-                title: (items) => items[0]?.label ?? "",
-              },
-            },
-            // 👇 no zoom plugin here at all
-          },
-          scales: {
-            x: {
-              grid: { color: "rgba(148,163,184,0.1)" },
-              ticks: { color: "#94a3b8", maxTicksLimit: 12 },
-            },
-            y: {
-              grid: { color: "rgba(148,163,184,0.1)" },
-              ticks: { color: "#94a3b8" },
-            },
-          },
-        }}
+        data={chartData}
+        options={options}
+        role="img"
+        aria-label={`Fan chart for ${symbol} over ${horizon_days} days with median, 80% and 95% bands`}
       />
     </div>
   );
-};
+}

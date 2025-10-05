@@ -1,103 +1,56 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
+// frontend/vite.config.ts
+import { defineConfig, type ProxyOptions } from "vite";
+import react from "@vitejs/plugin-react";
+
+const backend = "http://127.0.0.1:8083";
+
+function sseProxy(): ProxyOptions {
+  return {
+    target: backend,
+    changeOrigin: true,
+    secure: false,
+    ws: true,
+    configure(proxy) {
+      proxy.on("error", (err) => console.error("Proxy error:", err));
+      proxy.on("proxyReq", (proxyReq) => {
+        proxyReq.setHeader("Connection", "keep-alive");
+        proxyReq.setHeader("Cache-Control", "no-cache");
+      });
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/simulate': {
-        target: 'http://127.0.0.1:8081',
-        changeOrigin: true,
-        secure: false,
-        ws: true, // Enable WS proxying for SSE
-        configure: (proxy, options) => {
-          // Log proxy errors for debugging
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-          });
-          // Ensure keep-alive for SSE/streaming
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            proxyReq.setHeader('Connection', 'keep-alive');
-            proxyReq.setHeader('Cache-Control', 'no-cache');
-          });
-        },
-      }, // Added closing brace
+      "/simulate": sseProxy(),
+      "/predict": sseProxy(),
+      "/train": sseProxy(),
+      "/api": sseProxy(),
+      "/models": sseProxy(),
+      "/outcomes": sseProxy(),
+      "/learn": sseProxy(),
     },
   },
   build: {
+    // single entry from index.html — don't pass Rollup random inputs
     rollupOptions: {
+      input: "index.html",
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'chart.js', 'chartjs-plugin-zoom', 'framer-motion', 'react-hot-toast'],
-          app: ['./src/App.tsx', './src/components/FanChart.tsx'],
-        },
-      },
-      // Apply the same to other entries
-      '/news': {
-        target: 'http://127.0.0.1:8081',
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-          });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            proxyReq.setHeader('Connection', 'keep-alive');
-            proxyReq.setHeader('Cache-Control', 'no-cache');
-          });
-        },
-      },
-      '/train': {
-        target: 'http://127.0.0.1:8081',
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-          });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            proxyReq.setHeader('Connection', 'keep-alive');
-            proxyReq.setHeader('Cache-Control', 'no-cache');
-          });
-        },
-      },
-      '/predict': {
-        target: 'http://127.0.0.1:8081',
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-          });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            proxyReq.setHeader('Connection', 'keep-alive');
-            proxyReq.setHeader('Cache-Control', 'no-cache');
-          });
-        },
-      },
-      '/models': {
-        target: 'http://127.0.0.1:8081',
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err);
-          });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
-            proxyReq.setHeader('Connection', 'keep-alive');
-            proxyReq.setHeader('Cache-Control', 'no-cache');
-          });
+        // optional chunking; safe and zoom-free
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react") || id.includes("react-dom")) return "react-vendor";
+            if (id.includes("chart.js") || id.includes("react-chartjs-2")) return "chart-vendor";
+            if (id.includes("framer-motion")) return "motion-vendor";
+          }
         },
       },
     },
   },
-  esbuild: {
-    loader: 'tsx',
-    include: /src\/.*\.[jt]sx?$/,
+  optimizeDeps: {
+    include: ["chart.js", "react-chartjs-2"],
+    exclude: ["chartjs-plugin-zoom"], // make sure it's never pulled in
   },
 });

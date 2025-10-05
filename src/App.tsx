@@ -1,56 +1,53 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Toaster } from "react-hot-toast";
 import toast from "react-hot-toast";
-import {
-  Chart as ChartJS,
-  LineElement,
-  PointElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  Filler,
-  DoughnutController,
-  ArcElement,
-} from "chart.js";
-import { Line, Doughnut } from "react-chartjs-2";
+import html2canvas from "html2canvas";
+import "chart.js/auto";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { FanChart } from "./components/FanChart";
+import { throttle } from "./utils/throttle";
+import { encodeState, decodeState } from "./utils/stateShare";
 import { Card } from "./components/ui/Card";
-import { NewsList } from "./components/NewsList"
-import { useNews } from "./hooks/useNews"
-import {
-  ScenarioTiles,
-  DriversWaterfall,
-  TerminalDistribution,
-  HitProbabilityRibbon,
-  TargetLadder,
-  RegimeMap,
-  CalibrationPanel,
-  OptionsMiniBoard,
-  FuturesCurve,
-  SentimentStrip,
-  ConeVsRealized,
-} from "./components/PredictiveAddOns";
+import { NewsList } from "./components/NewsList";
+import { useNews } from "./hooks/useNews";
+import { InlineLegend } from "./components/InlineLegend";
+import { ChartActions } from "./components/ChartActions";
+import { SummaryCard } from "./components/SummaryCard";
+import { SimulationControls } from "./components/SimulationControls";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ChallengePanel } from "./components/ChallengePanel";
+import { AccessibleTabs } from "./components/AccessibleTabs";
+import { PP_COLORS } from "./theme/chartTheme";
+import { QuickSimsPanel } from "./components/QuickSimsPanel";
+import { useCallback } from "react";
+import RightRail from "./components/RightRail";
 
 
-ChartJS.register(
-  LineElement,
-  PointElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  Filler,
-  DoughnutController,
-  ArcElement
+
+
+// Lazy-loaded chart components
+const FanChart = React.lazy(() => import("./components/FanChart"));
+const HitProbabilityRibbon = React.lazy(() =>
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.HitProbabilityRibbon }))
+);
+const TerminalDistribution = React.lazy(() =>
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.TerminalDistribution }))
+);
+const ScenarioTiles = React.lazy(() =>
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.ScenarioTiles }))
+);
+const DriversWaterfall = React.lazy(() =>
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.DriversWaterfall }))
+);
+const TargetLadder = React.lazy(() =>
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.TargetLadder }))
 );
 
-// ----------------------------
-// Types
-// ----------------------------
-type MCArtifact = {
+const ChartFallback: React.FC = () => (
+  <div className="text-xs text-gray-400">Loading chart…</div>
+);
+
+interface MCArtifact {
   symbol: string;
   horizon_days: number;
   median_path: [number, number][];
@@ -63,14 +60,12 @@ type MCArtifact = {
   };
   prob_up_end: number;
   drivers: { feature: string; weight: number }[];
-
-  // NEW optional fields from backend (used by add-ons)
   terminal_prices?: number[];
   var_es?: { var95: number; es95: number };
   hit_probs?: { thresholds_abs: number[]; probs_by_day: number[][] };
-};
+}
 
-type RunSummary = {
+interface RunSummary {
   id: string;
   symbol: string;
   horizon: number;
@@ -78,7 +73,7 @@ type RunSummary = {
   finishedAt: string;
   q50?: number | null;
   probUp?: number | null;
-};
+}
 
 const PandaIcon = () => (
   <svg
@@ -86,59 +81,43 @@ const PandaIcon = () => (
     fill="none"
     stroke="currentColor"
     viewBox="0 0 24 24"
+    aria-hidden="true"
   >
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 4c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-4 7c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v2h-8v-2z" />
   </svg>
 );
 
 export default function App() {
-  // ----------------------------
-  // Theme & base UI state
-  // ----------------------------
   const getInitialTheme = (): "dark" | "light" => {
-    const savedTheme = localStorage.getItem("theme");
+    const savedTheme = localStorage.getItem("theme") || "dark";
     return savedTheme === "light" || savedTheme === "dark" ? savedTheme : "dark";
   };
+  const LOG_HEIGHT = "h-40"; 
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [symbol, setSymbol] = useState("NVDA");
   const [horizon, setHorizon] = useState<number | "">("");
   const [paths, setPaths] = useState(2000);
   const [includeOptions, setIncludeOptions] = useState(true);
   const [includeFutures, setIncludeFutures] = useState(true);
-  const [includeNews, setIncludeNews] = useState(true);
+  const [includeNews, setIncludeNews] = useState(false);
   const [xHandles, setXHandles] = useState("");
-  // API key UX: keep stored key off-screen; input starts empty
-  const savedApiKeyRef = useRef(localStorage.getItem("apiKey") || "");
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(() => {
+    const stored = localStorage.getItem("apiKey") || "";
+    return stored && !stored.toLowerCase().includes("error") ? stored.trim() : "";
+  });
   const [showApiKey, setShowApiKey] = useState(false);
-  const getApiKey = () => apiKey || savedApiKeyRef.current || "";
   const [isTraining, setIsTraining] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
-
-  useEffect(() => {
-    if (apiKey) localStorage.setItem("apiKey", apiKey);
-  }, [apiKey]);
-
-  // ----------------------------
-  // Simulation state
-  // ----------------------------
+  const [isSimulating, setIsSimulating] = useState(false);
   const [runId, setRunId] = useState("");
   const [logMessages, setLogMessages] = useState<string[]>([]);
-  const [drivers, setDrivers] = useState<{ feature: string; weight: number }[]>(
-    []
-  );
+  const [drivers, setDrivers] = useState<{ feature: string; weight: number }[]>([]);
   const [probUp, setProbUp] = useState(0);
   const [art, setArt] = useState<MCArtifact | null>(null);
   const [progress, setProgress] = useState(0);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(
-    !localStorage.getItem("onboardingSeen")
-  );
-  const logRef = useRef<HTMLDivElement | null>(null);
-  const horizonNum = typeof horizon === "number" ? horizon : null;
-
+  const [showOnboarding, setShowOnboarding] = useState(!localStorage.getItem("onboardingSeen"));
+  const [activeTab, setActiveTab] = useState<"risk" | "scenarios">("risk");
   const [runHistory, setRunHistory] = useState<RunSummary[]>(() => {
     try {
       const saved = localStorage.getItem("pp_runs");
@@ -147,17 +126,44 @@ export default function App() {
       return [];
     }
   });
+  const logRef = useRef<HTMLDivElement | null>(null);
+  const horizonNum = typeof horizon === "number" ? horizon : null;
 
-  // Tabs state
-  const [activeTab, setActiveTab] = useState("risk");
+  const throttledLog = useMemo(() => throttle((m: string) => {
+    setLogMessages((prev) => {
+      if (prev[prev.length - 1] === m) return prev;
+      return prev.length >= 50 ? [...prev.slice(1), m] : [...prev, m];
+    });
+  }, 120), []);
+  const throttledProgress = useMemo(() => throttle((p: number) => setProgress(p), 100), []);
 
-  // ----------------------------
-  // Effects
-  // ----------------------------
+  const { items: newsItems, nextCursor, loading: newsLoading, error: newsError, loadMore } = useNews({
+    symbol,
+    includeNews,
+    apiKey,
+    limit: 6,
+    days: 7,
+    onLog: throttledLog,
+    retry: 0,
+  });
+  const QUICK_PRESETS = [
+    { symbol: "NVDA", horizon: 30, paths: 1000 },
+    { symbol: "TSLA", horizon: 60, paths: 2000 },
+    { symbol: "AAPL", horizon: 30, paths: 1500 },
+    { symbol: "NIO",  horizon: 30, paths: 1500 },
+  ];
+
+
   useEffect(() => {
     localStorage.setItem("theme", theme);
-    document.documentElement.className = theme === "dark" ? "dark" : "";
+    document.documentElement.className = theme;
   }, [theme]);
+
+  useEffect(() => {
+    const k = apiKey && !apiKey.toLowerCase().includes("error") ? apiKey.trim() : "";
+    if (k) localStorage.setItem("apiKey", k);
+    else localStorage.removeItem("apiKey");
+  }, [apiKey]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -174,89 +180,171 @@ export default function App() {
       return () => clearTimeout(t);
     }
   }, [showOnboarding]);
-  const {
-    items: newsItems,
-    nextCursor,
-    loading: newsLoading,
-    error: newsError,
-    loadMore,
-  } = useNews({ symbol, includeNews, getApiKey, log });
+  //prevent double runsimualtions
+  const handleRunSimulationClick = useCallback(async () => {
+    if (isSimulating) return;          // hard guard
+    setIsSimulating(true);
+    try {
+      await runSimulation();           
+    } finally {
+      setIsSimulating(false);
+    }
+  }, [isSimulating, runSimulation]);
 
+  const handleRunPredictClick = useCallback(async () => {
+    if (isPredicting) return;
+    setIsPredicting(true);
+    try {
+      await runPredict();
+    } finally {
+      setIsPredicting(false);
+    }
+  }, [isPredicting, runPredict]);
 
-  // ----------------------------
-  // Helpers
-  // ----------------------------
-  
-  function log(m: string) {
-    setLogMessages((prev) => [...prev, m].slice(-50));
+  const handleTrainModelClick = useCallback(async () => {
+    if (isTraining) return;
+    setIsTraining(true);
+    try {
+      await trainModel();
+    } finally {
+      setIsTraining(false);
+    }
+  }, [isTraining, trainModel]);
+
+  const chartData = useMemo(() => {
+    if (!art) return null;
+    return {
+      labels: art.median_path.map(([t]) => `D${t}`),
+      datasets: [
+        {
+          label: "Median",
+          data: art.median_path.map(([, y]) => y),
+          borderColor: PP_COLORS.median,
+          borderWidth: 2,
+          pointRadius: 0,
+        },
+        {
+          label: "80% Range",
+          data: art.bands.p80_high.map(([, y]) => y),
+          borderWidth: 0,
+          fill: "+1",
+          backgroundColor: PP_COLORS.p80,
+        },
+        {
+          label: "_p80_low_hidden",
+          data: art.bands.p80_low.map(([, y]) => y),
+          borderWidth: 0,
+          fill: false,
+        },
+      ],
+    };
+  }, [art]);
+
+  const handlePreset = (preset: { symbol: string; horizon: number; paths: number }) => {
+    setSymbol(preset.symbol);
+    setHorizon(preset.horizon);
+    setPaths(preset.paths);
+  };
+
+const exportChart = async (chartId: string) => {
+  try {
+    const container = document.querySelector(
+      `[data-chart="${chartId}"]`
+    ) as HTMLElement | null;
+
+    if (container) {
+      // Prefer the inner canvas if present; otherwise screenshot the container
+      const canvas = container.querySelector("canvas") as HTMLCanvasElement | null;
+      const element = canvas ?? container;
+
+      const screenshot = await html2canvas(element, {
+        backgroundColor: theme === "dark" ? "#0A111A" : "#F3F4F6",
+      });
+      const url = screenshot.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${chartId}.png`;
+      link.click();
+    }
+
+    if (art && ["fan", "hit", "terminal", "scenarios", "drivers", "ladder"].includes(chartId)) {
+      let csvData: string[][] = [];
+      switch (chartId) {
+        case "fan":
+          csvData = [
+            ["Day", "Median", "P80 Low", "P80 High", "P95 Low", "P95 High"],
+            ...art.median_path.map(([t], i) => [
+              `D${t}`,
+              art.median_path[i][1].toFixed(2),
+              art.bands.p80_low[i][1].toFixed(2),
+              art.bands.p80_high[i][1].toFixed(2),
+              art.bands.p95_low[i][1].toFixed(2),
+              art.bands.p95_high[i][1].toFixed(2),
+            ]),
+          ];
+          break;
+        case "hit":
+          csvData = [
+            ["Day", ...(art.hit_probs?.thresholds_abs.map((t) => `Above ${t.toFixed(2)}`) || [])],
+            ...art.median_path.map(([t], i) => [
+              `D${t}`,
+              ...(art.hit_probs?.probs_by_day.map((probs) => probs[i]?.toFixed(2) || "0") || []),
+            ]),
+          ];
+          break;
+        case "terminal":
+          csvData = [
+            ["Price", "Frequency"],
+            ...(art.terminal_prices?.map((p) => [p.toFixed(2), "1"]) || []),
+          ];
+          break;
+        case "drivers":
+          csvData = [["Driver", "Weight"], ...drivers.map((d) => [d.feature, d.weight.toFixed(2)])];
+          break;
+        case "ladder":
+          csvData = [["Target", "Probability"], ...targetLadderData.map((d) => [d.label, (d.p * 100).toFixed(2)])];
+          break;
+      }
+      if (csvData.length) {
+        const csv = csvData.map((row) => row.join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const csvLink = document.createElement("a");
+        csvLink.href = URL.createObjectURL(blob);
+        csvLink.download = `${chartId}.csv`;
+        csvLink.click();
+      }
+      toast.success(`Exported ${chartId} as PNG and CSV`);
+    } else {
+      toast.error("No data available for export");
+    }
+  } catch (e: any) {
+    toast.error(`Export failed: ${e.message || e}`);
   }
+};
+
+  const shareChart = (chartId: string) => {
+    const state = encodeState({ symbol, horizon, paths, chartId });
+    const url = `${window.location.origin}/share?state=${state}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Shareable link copied!");
+  };
+
+  const apiHeaders = (key: string) => ({
+    "Content-Type": "application/json",
+    "X-API-Key": key,
+  });
 
   const lastOf = (arr: [number, number][]): number | undefined =>
     arr && arr.length ? arr[arr.length - 1][1] : undefined;
-  const terminalPrices = art?.terminal_prices ?? [];
-  const var95 = art?.var_es?.var95 ?? 0;
-  const es95  = art?.var_es?.es95 ?? 0;
-  const S0 = art?.median_path?.[0]?.[1] ?? 0;
-  const Spinner = () => (
-  <svg className="animate-spin h-4 w-4 text-[#9FB3C8]" viewBox="0 0 24 24">
-    <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-    <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
-  </svg>
-);
-  const primaryBtn =
-  "px-4 py-2 rounded-xl bg-[#1F2937] border border-[#273445] hover:bg-[#1B2431] disabled:opacity-60 disabled:cursor-not-allowed";
 
-  const pathMatrixAbove = (tIndex: number, thresholdAbs: number) => {
-    const hp = art?.hit_probs; if (!hp) return 0;
-    let best = 0, bestDiff = Infinity;
-    hp.thresholds_abs.forEach((thr, i) => {
-      const diff = Math.abs(thr - thresholdAbs);
-      if (diff < bestDiff) { bestDiff = diff; best = i; }
-    });
-    return hp.probs_by_day?.[best]?.[tIndex] ?? 0;
-  };
-
-  const targetLadderData = React.useMemo(() => {
-    const hp = art?.hit_probs; if (!hp) return [];
-    const lastT = art?.median_path?.length ? art.median_path.length - 1 : 0;
-    const labels = ["-5%", "0%", "+5%", "+10%"];
-    return hp.thresholds_abs.map((thr, i) => ({
-      label: labels[i] ?? `${Math.round(((thr / (S0 || 1)) - 1) * 100)}%`,
-      p: hp.probs_by_day?.[i]?.[lastT] ?? 0,
-    }));
-  }, [art, S0]);
-
-  const scenarioReps = art ? [
-    { label: "Bear (≈p05)", path: art.bands.p95_low },
-    { label: "Base (p50)",  path: art.median_path },
-    { label: "Bull (≈p95)", path: art.bands.p95_high },
-  ] : [];
-
-  // Export/Share functions (placeholder: use html2canvas or similar)
-  const exportChart = (chartId: string) => {
-      // TODO: implement panel export (e.g., html2canvas)
-    console.log(`Exporting chart: ${chartId}`);
-    // Implement export logic
-  };
-
-  // --- Simple % badge for Prob Up (no charts) ---
-  const probMeta = React.useMemo(() => {
+  const probMeta = useMemo(() => {
     const v = Math.max(0, Math.min(1, probUp || 0));
     const pct = Math.round(v * 100);
-    const color =
-      v > 0.51 ? "text-[#34D399]" : v < 0.49 ? "text-[#F87171]" : "text-[#FBBF24]";
+    const color = v > 0.51 ? "text-[#34D399]" : v < 0.49 ? "text-[#F87171]" : "text-[#FBBF24]";
     const label = v > 0.51 ? "Bullish" : v < 0.49 ? "Bearish" : "Neutral";
     return { v, pct, color, label };
   }, [probUp]);
 
-  const ProbBadge = () => (
-    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#111827] border border-[#1B2431] ${probMeta.color}`}>
-      <span className="font-semibold">{probMeta.pct}%</span>
-      <span className="text-xs text-gray-300">{probMeta.label}</span>
-    </div>
-  );
-
-  // --- simple percent formatter for VaR/ES ---
   const fmtPct = (x: number | undefined | null) =>
     (Number.isFinite(x) ? (x as number) : 0).toLocaleString(undefined, {
       style: "percent",
@@ -266,16 +354,6 @@ export default function App() {
 
   const redIfNeg = (x: number) => (x < 0 ? "text-[#F87171]" : "text-[#34D399]");
 
-  const shareChart = (chartId: string) => {
-    console.log(`Sharing chart: ${chartId}`);
-    // Implement share logic
-  };
-  const apiHeaders = (key: string) => ({
-    "Content-Type": "application/json",
-    "X-API-Key": key,
-  });
-
-  // 1) Label Now (POST /outcomes/label)
   async function labelNow(apiKey: string) {
     try {
       const r = await fetch(`/outcomes/label`, {
@@ -285,13 +363,11 @@ export default function App() {
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json();
       toast.success(`Labeled ${data.labeled ?? 0} outcomes`);
-      console.log("Label outcomes:", data);
     } catch (e: any) {
       toast.error(`Labeling failed: ${e.message || e}`);
     }
   }
 
-  // 2) Online Learn (POST /learn/online)
   async function learnNow(apiKey: string, symbol: string) {
     try {
       const r = await fetch(`/learn/online`, {
@@ -302,20 +378,76 @@ export default function App() {
       if (!r.ok) throw new Error(await r.text());
       const data = await r.json();
       toast.success(`Online learn OK — w[0]=${data.model?.coef?.[0]?.toFixed(3) ?? "?"}`);
-      console.log("Online learn:", data);
     } catch (e: any) {
       toast.error(`Online learn failed: ${e.message || e}`);
     }
   }
-  // ----------------------------
-  // Actions
-  // ----------------------------
-  async function runSimulation() {
-    const effectiveKey = getApiKey();
-    if (!effectiveKey) { log("Error: Please enter a valid API key"); return; }
-    if (horizonNum == null) { log("Error: Please enter a horizon (days)."); return; }
-    if (horizonNum > 365) { log("Error: Horizon must be ≤ 365 days."); return; }
 
+  async function trainModel() {
+    if (!apiKey) {
+      throttledLog("Error: Please enter a valid API key");
+      return;
+    }
+    setIsTraining(true);
+    throttledLog("Training model...");
+    try {
+      const resp = await fetch("/train", {
+        method: "POST",
+        headers: apiHeaders(apiKey),
+        body: JSON.stringify({ symbol, lookback_days: 180 }),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Train failed: ${resp.status} – ${txt}`);
+      }
+      throttledLog("Model trained successfully.");
+    } catch (e: any) {
+      throttledLog(`Error: ${e.message || e}`);
+    } finally {
+      setIsTraining(false);
+    }
+  }
+
+  async function runPredict() {
+    if (!apiKey) {
+      throttledLog("Error: Please enter a valid API key");
+      return;
+    }
+    setIsPredicting(true);
+    throttledLog("Running prediction...");
+    try {
+      const h = typeof horizon === "number" ? horizon : 30;
+      const resp = await fetch("/predict", {
+        method: "POST",
+        headers: apiHeaders(apiKey),
+        body: JSON.stringify({ symbol, horizon_days: h }),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Predict failed: ${resp.status} – ${txt}`);
+      }
+      const js = await resp.json();
+      throttledLog(`Prediction: Prob Up Next = ${(js.prob_up_next * 100).toFixed(2)}%`);
+    } catch (e: any) {
+      throttledLog(`Error: ${e.message || e}`);
+    } finally {
+      setIsPredicting(false);
+    }
+  }
+
+  async function runSimulation() {
+    if (!apiKey) {
+      throttledLog("Error: Please enter a valid API key");
+      return;
+    }
+    if (horizonNum == null) {
+      throttledLog("Error: Please enter a horizon (days).");
+      return;
+    }
+    if (horizonNum > 365) {
+      throttledLog("Error: Horizon must be ≤ 365 days.");
+      return;
+    }
     setIsSimulating(true);
     setLogMessages([]);
     setArt(null);
@@ -323,11 +455,7 @@ export default function App() {
     setDrivers([]);
     setProbUp(0);
     setCurrentPrice(null);
-
-    const headers = { "Content-Type": "application/json", "X-API-Key": effectiveKey };
-
     try {
-      // 1) Kick off the simulation
       const payload: any = {
         symbol: symbol.toUpperCase(),
         horizon_days: Number(horizonNum),
@@ -337,134 +465,76 @@ export default function App() {
         include_options: !!includeOptions,
         include_futures: !!includeFutures,
       };
-      if (xHandles.trim()) payload.x_handles = xHandles.trim(); // comma-separated string
-
+      if (xHandles.trim()) payload.x_handles = xHandles.trim();
       const resp = await fetch("/simulate", {
         method: "POST",
-        headers,
+        headers: apiHeaders(apiKey),
         body: JSON.stringify(payload),
       });
-
       if (!resp.ok) {
         const errText = await resp.text();
         throw new Error(`HTTP ${resp.status} – ${errText}`);
       }
-
       const { run_id } = await resp.json();
       setRunId(run_id);
-      log(`Queued run_id: ${run_id}`);
-
-      // 2) Stream progress
+      throttledLog(`Queued run_id: ${run_id}`);
       await fetchEventSource(`/simulate/${run_id}/stream`, {
-        headers,
+        headers: apiHeaders(apiKey),
         onopen: async (r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          log("Connected to stream");
+          throttledLog("Connected to stream");
         },
         onmessage: (ev) => {
           try {
             const d = JSON.parse(ev.data);
             if (typeof d.status === "string") {
               const p = typeof d.progress === "number" ? d.progress : 0;
-              setProgress(p);
-              log(`Status: ${d.status} | Progress: ${Math.round(p)}%`);
+              throttledProgress(p);
+              throttledLog(`Status: ${d.status} | Progress: ${Math.round(p)}%`);
             }
-          } catch {
-            // ignore one-off parse blips
-          }
+          } catch {}
         },
-        onerror: (err) => { throw err; },
-        onclose: () => log("Stream closed."),
+        onerror: (err) => {
+          throw err;
+        },
+        onclose: () => throttledLog("Stream closed."),
       });
-
-      // 3) Fetch artifact
-      const a = await fetch(`/simulate/${run_id}/artifact`, { headers });
+      const a = await fetch(`/simulate/${run_id}/artifact`, { headers: apiHeaders(apiKey) });
       if (!a.ok) {
         const errText = await a.text();
         throw new Error(`Artifact fetch failed: ${a.status} – ${errText}`);
       }
       const artf: MCArtifact = await a.json();
-
       setArt(artf);
       setDrivers(artf.drivers || []);
       setProbUp(artf.prob_up_end || 0);
-      setCurrentPrice(
-        (artf as any).spot ??
-        artf.median_path?.[0]?.[1] ??
-        null
-      );
-      // Save a short summary to history
+      setCurrentPrice((artf as any).spot ?? artf.median_path?.[0]?.[1] ?? null);
       setRunHistory((prev) => {
-        const updated = [{
-          id: run_id,
-          symbol,
-          horizon: horizonNum ?? 0,
-          n_paths: paths,
-          finishedAt: new Date().toISOString(),
-          q50: artf.bands.p50?.[artf.bands.p50.length - 1]?.[1] ?? null,
-          probUp: artf.prob_up_end ?? null,
-        }, ...prev].slice(0, 20);
-        try { localStorage.setItem("pp_runs", JSON.stringify(updated)); } catch {}
+        const updated = [
+          {
+            id: run_id,
+            symbol,
+            horizon: horizonNum ?? 0,
+            n_paths: paths,
+            finishedAt: new Date().toISOString(),
+            q50: artf.bands.p50?.[artf.bands.p50.length - 1]?.[1] ?? null,
+            probUp: artf.prob_up_end ?? null,
+          },
+          ...prev,
+        ].slice(0, 20);
+        try {
+          localStorage.setItem("pp_runs", JSON.stringify(updated));
+        } catch {}
         return updated;
       });
-
     } catch (e: any) {
-      log(`Error: ${e.message ?? e}`);
+      throttledLog(`Error: ${e.message ?? e}`);
     } finally {
       setIsSimulating(false);
     }
   }
-  async function trainModel() {
-    const effectiveKey = getApiKey();
-    if (!effectiveKey) { log("Error: Please enter a valid API key"); return; }
-    setIsTraining(true);
-    log("Training model...");
-    try {
-      const headers = { "Content-Type": "application/json", "X-API-Key": effectiveKey };
-      const resp = await fetch("/train", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ symbol, lookback_days: 180 }),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        throw new Error(`Train failed: ${resp.status} – ${txt}`);
-      }
-      log("Model trained successfully.");
-    } catch (e: any) {
-      log(`Error: ${e.message ?? e}`);
-    } finally {
-      setIsTraining(false);
-    }
-  }
 
-  async function runPredict() {
-    const effectiveKey = getApiKey();
-    if (!effectiveKey) { log("Error: Please enter a valid API key"); return; }
-    setIsPredicting(true);
-    log("Running prediction...");
-    try {
-      const headers = { "Content-Type": "application/json", "X-API-Key": effectiveKey };
-      const h = typeof horizon === "number" ? horizon : 30;
-      const resp = await fetch("/predict", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ symbol, horizon_days: h }),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        throw new Error(`Predict failed: ${resp.status} – ${txt}`);
-      }
-      const js = await resp.json();
-      log(`Prediction: Prob Up Next = ${(js.prob_up_next * 100).toFixed(2)}%`);
-    } catch (e: any) {
-      log(`Error: ${e.message ?? e}`);
-    } finally {
-      setIsPredicting(false);
-    }
-  }
-
-  function exportArtifact() {
+  const exportArtifact = () => {
     if (!art) return;
     const blob = new Blob([JSON.stringify(art, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -473,447 +543,479 @@ export default function App() {
     a.download = `mc_${art.symbol}_${art.horizon_days}d.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }
+    toast.success("Exported artifact as JSON");
+  };
 
-  // ----------------------------
-  // Renders
-  // ----------------------------
-  return (
-    <div className="min-h-screen bg-[#0A0F17] text-[#F9F8F3] font-sans">
-      <Toaster position="bottom-right" />
+  const terminalPrices = art?.terminal_prices ?? [];
+  const var95 = art?.var_es?.var95 ?? 0;
+  const es95 = art?.var_es?.es95 ?? 0;
+  const S0 = art?.median_path?.[0]?.[1] ?? 0;
 
-      <main className="max-w-6xl mx-auto p-6">
-        {/* Inputs */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <div>
-            <label className="text-xs text-gray-400">Symbol</label>
-            <input
-              className="w-full mt-1 px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] outline-none"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              placeholder="NVDA"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-gray-400">Horizon (days)</label>
-            <input
-              type="number"
-              className="w-full mt-1 px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] outline-none"
-              value={horizon}
-              onChange={(e) => setHorizon(e.target.valueAsNumber || "")}
-              placeholder="30"
-              min={1}
-              max={365}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-gray-400">Paths</label>
-            <input
-              type="number"
-              className="w-full mt-1 px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] outline-none"
-              value={paths}
-              onChange={(e) => setPaths(e.target.valueAsNumber)}
-              min={100}
-              step={100}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-gray-400">API Key</label>
-            <div className="relative mt-1">
-              <input
-                type={showApiKey ? "text" : "password"}
-                className="w-full px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] outline-none"
-                value={apiKey || savedApiKeyRef.current}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-              />
-              <button
-                onClick={() => setShowApiKey((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400"
+  const pathMatrixAbove = (tIndex: number, thresholdAbs: number) => {
+    const hp = art?.hit_probs;
+    if (!hp) return 0;
+    let best = 0,
+      bestDiff = Infinity;
+    hp.thresholds_abs.forEach((thr, i) => {
+      const diff = Math.abs(thr - thresholdAbs);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = i;
+      }
+    });
+    return hp.probs_by_day?.[best]?.[tIndex] ?? 0;
+  };
+
+  const targetLadderData = useMemo(() => {
+    const hp = art?.hit_probs;
+    if (!hp) return [];
+    const lastT = art?.median_path?.length ? art.median_path.length - 1 : 0;
+    const labels = ["-5%", "0%", "+5%", "+10%"];
+    return hp.thresholds_abs.map((thr, i) => ({
+      label: labels[i] ?? `${Math.round(((thr / (S0 || 1)) - 1) * 100)}%`,
+      p: hp.probs_by_day?.[i]?.[lastT] ?? 0,
+    }));
+  }, [art, S0]);
+
+  const scenarioReps = art
+    ? [
+        { label: "Bear (≈p05)", path: art.bands.p95_low },
+        { label: "Base (p50)", path: art.median_path },
+        { label: "Bull (≈p95)", path: art.bands.p95_high },
+      ]
+    : [];
+
+// --- Tabs (now using Card `actions` slot) ---
+  const tabs = art
+    ? [
+        {
+          id: "risk",
+          label: "Risk",
+          content: (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Price Forecast */}
+              <motion.div
+                className="md:col-span-2"
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3 }}
               >
-                {showApiKey ? "Hide" : "Show"}
-              </button>
-            </div>
-          </div>
-        </div>
+                <Card
+                  title="Price Forecast"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("fan")}
+                      onShare={() => shareChart("fan")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
+                    <FanChart data={art} />
+                  </Suspense>
+                </Card>
+              </motion.div>
 
-        {/* Toggles & Advanced */}
-        <div className="flex items-center gap-4 mb-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={includeOptions}
-              onChange={(e) => setIncludeOptions(e.target.checked)}
-            />
-            Include Options
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={includeFutures}
-              onChange={(e) => setIncludeFutures(e.target.checked)}
-            />
-            Include Futures
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={includeNews}
-              onChange={(e) => setIncludeNews(e.target.checked)}
-            />
-            Include News
-          </label>
-          <button
-            onClick={() => setShowAdvanced((v) => !v)}
-            className="ml-auto px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431]"
-          >
-            {showAdvanced ? "Hide Advanced" : "Advanced"}
-          </button>
-        </div>
+              {/* Hit Probabilities */}
+              <motion.div
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+              >
+                <Card
+                  title="Hit Probabilities"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("hit")}
+                      onShare={() => shareChart("hit")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
+                    <HitProbabilityRibbon
+                      artifact={{
+                        symbol: art.symbol,
+                        horizon_days: art.horizon_days,
+                        median_path: art.median_path,
+                        bands: art.bands,
+                      }}
+                      thresholds={[-0.05, 0, 0.05, 0.1]}
+                      S0={S0}
+                      pathMatrixAbove={pathMatrixAbove}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
 
-        {/* Advanced */}
-        {showAdvanced && (
-          <div className="mb-4">
-            <label className="text-xs text-gray-400">X handles (comma-sep)</label>
-            <input
-              className="w-full mt-1 px-3 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] outline-none"
-              value={xHandles}
-              onChange={(e) => setXHandles(e.target.value)}
-              placeholder="@elonmusk,@business"
-            />
-          </div>
-        )}
+              {/* Outcomes at Horizon */}
+              <motion.div
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3, delay: 0.2 }}
+              >
+                <Card
+                  title="Outcomes at Horizon"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("terminal")}
+                      onShare={() => shareChart("terminal")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
+                    <TerminalDistribution
+                      pathsTerminal={terminalPrices}
+                      ptiles={{
+                        p05: lastOf(art.bands.p95_low),
+                        p50: lastOf(art.bands.p50),
+                        p95: lastOf(art.bands.p95_high),
+                      }}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
 
-        {/* Actions */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <button
-            onClick={runSimulation}
-            disabled={isSimulating || !symbol || !horizonNum || !paths}
-            className={primaryBtn}
-          >
-            {isSimulating ? (
-              <span className="inline-flex items-center gap-2"><Spinner /> Running…</span>
-            ) : (
-              "Run Simulation"
-            )}
-          </button>
-
-          <button
-            onClick={trainModel}
-            disabled={isTraining}
-            className={primaryBtn}
-            aria-busy={isTraining}
-          >
-            {isTraining ? (
-              <span className="inline-flex items-center gap-2"><Spinner /> Training…</span>
-            ) : (
-              "Train"
-            )}
-          </button>
-
-          <button
-            onClick={runPredict}
-            disabled={isPredicting}
-            className={primaryBtn}
-            aria-busy={isPredicting}
-          >
-            {isPredicting ? (
-              <span className="inline-flex items-center gap-2"><Spinner /> Predicting…</span>
-            ) : (
-              "Predict"
-            )}
-          </button>
-
-          <button
-            onClick={exportArtifact}
-            disabled={!art}
-            className="px-4 py-2 rounded-xl bg-[#131A23] border border-[#1B2431] disabled:opacity-60"
-          >
-            Export Artifact
-          </button>
-
-          <div className="ml-auto"><ProbBadge /></div>
-        </div>
-
-        <div className="flex gap-2 mb-4">
-          <button
-            className="px-3 py-2 rounded bg-emerald-600 text-white disabled:opacity-60"
-            onClick={() => labelNow(apiKey)}
-            disabled={!apiKey}
-          >
-            Label Outcomes (Now)
-          </button>
-          <button
-            className="px-3 py-2 rounded bg-indigo-600 text-white disabled:opacity-60"
-            onClick={() => learnNow(apiKey, symbol)}
-            disabled={!apiKey}
-          >
-            Online Learn
-          </button>
-        </div>
-
-        {/* Log */}
-        <div
-          ref={logRef}
-          className="text-xs bg-[#0E141C] border border-[#1B2431] rounded-xl p-3 h-28 overflow-auto mb-6"
-        >
-          {logMessages.map((m, i) => (
-            <div key={i} className="text-gray-300">
-              {m}
-            </div>
-          ))}
-        </div>
-
-        {/* --- News (optional) -------------------------------------------------- */}
-        {includeNews && (
-          <NewsList
-            symbol={symbol}
-            items={newsItems}
-            loading={newsLoading}
-            error={newsError}
-            nextCursor={nextCursor}
-            onLoadMore={loadMore}
-          />
-        )}
-        {/* Sticky Decision Bar (text-only, no charts) */}
-        {art && (
-          <div className="sticky top-0 z-10 -mx-6 px-6 py-3 bg-[#0A0F17]/70 backdrop-blur border-b border-[#121923] mb-6">
-            <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Card title="Probability Up">
-                <div className="min-h-[72px] flex items-center">
-                  <ProbBadge />
-                </div>
-              </Card>
-
-              <Card title="Risk">
-                <div className="min-h-[72px] text-sm leading-6">
-                  <div>
-                    <span className="text-gray-400">VaR 95%:</span>{" "}
-                    <span className={redIfNeg(var95)}>{fmtPct(var95)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400">ES 95%:</span>{" "}
-                    <span className={redIfNeg(es95)}>{fmtPct(es95)}</span>
-                  </div>
-                </div>
-              </Card>
-
-              <Card title="Horizon Odds">
-                <div className="min-h-[72px]">
-                  {targetLadderData.length ? (
+              {/* Target Ladder */}
+              <motion.div
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3, delay: 0.3 }}
+              >
+                <Card
+                  title="Target Ladder"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("ladder")}
+                      onShare={() => shareChart("ladder")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
                     <TargetLadder probs={targetLadderData} />
-                  ) : (
-                    <div className="text-xs text-gray-400">
-                      Run a simulation to see horizon odds.
-                    </div>
-                  )}
-                </div>
-              </Card>
+                  </Suspense>
+                </Card>
+              </motion.div>
             </div>
-          </div>
-        )}
+          ),
+        },
+        {
+          id: "scenarios",
+          label: "Scenarios",
+          content: (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Scenario Tiles */}
+              <motion.div
+                className="md:col-span-2"
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <Card
+                  title="Scenario Tiles"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("scenarios")}
+                      onShare={() => shareChart("scenarios")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
+                    <ScenarioTiles
+                      artifact={{
+                        symbol: art.symbol,
+                        horizon_days: art.horizon_days,
+                        median_path: art.median_path,
+                        bands: {
+                          p05: art.bands.p95_low,
+                          p50: art.bands.p50,
+                          p95: art.bands.p95_high,
+                        },
+                        prob_up_end: art.prob_up_end,
+                        drivers:
+                          art.drivers?.map((d) => ({
+                            name: d.feature,
+                            weight: d.weight,
+                          })) ?? [],
+                      }}
+                      reps={scenarioReps}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
 
-        {/* Fan Chart */}
-        {art && (
-          <div className="mb-6">
-            <Card title="Fan Chart">
-              <FanChart
-                data={{
-                  symbol: art.symbol,
-                  median_path: art.median_path,
-                  bands: {
-                    p50: art.bands.p50,
-                    p80_low: art.bands.p80_low,
-                    p80_high: art.bands.p80_high,
-                    p95_low: art.bands.p95_low,
-                    p95_high: art.bands.p95_high,
-                  },
-                  prob_up_end: art.prob_up_end,
-                  horizon_days: art.horizon_days,
+              {/* Top Drivers */}
+              <motion.div
+                initial={{ y: 20 }}
+                animate={{ y: 0 }}
+                transition={{ duration: 0.3, delay: 0.1 }}
+              >
+                <Card
+                  title="Top Drivers"
+                  collapsible
+                  actions={
+                    <ChartActions
+                      onExport={() => exportChart("drivers")}
+                      onShare={() => shareChart("drivers")}
+                    />
+                  }
+                >
+                  <Suspense fallback={<ChartFallback />}>
+                    <DriversWaterfall
+                      drivers={drivers.map((d) => ({
+                        name: d.feature,
+                        weight: d.weight,
+                      }))}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
+            </div>
+          ),
+        },
+      ]
+    : [];
+
+  // --- Render ---
+  return (
+    <ErrorBoundary>
+      <div
+        className={`min-h-screen ${
+          theme === "dark" ? "bg-black text-white" : "bg-gray-100 text-gray-900"
+        }`}
+      >
+        <Toaster />
+        <main className="mx-auto max-w-[1280px] p-4">
+          {/* top bar */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <PandaIcon />
+              <h1 className="text-xl font-bold">PredictiveTwin</h1>
+            </div>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="p-2 rounded bg-[#131A23] border border-[#1B2431]"
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+          </div>
+
+          {/* onboarding */}
+          {showOnboarding && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="mb-6 p-4 rounded bg-[#131A23] border border-[#1B2431]"
+            >
+              <h2 className="text-lg font-semibold">Welcome to PredictiveTwin!</h2>
+              <p className="text-sm">Run simulations, analyze risks, and explore scenarios.</p>
+              <button
+                onClick={() => {
+                  localStorage.setItem("onboardingSeen", "true");
+                  setShowOnboarding(false);
+                }}
+                className="mt-2 px-3 py-1 rounded bg-[#34D399] text-black text-sm"
+                aria-label="Dismiss onboarding"
+              >
+                Got it
+              </button>
+            </motion.div>
+          )}
+
+          {/* layout: main column + sticky right rail */}
+          <div className="flex gap-4 items-start">
+            {/* LEFT: main column */}
+            <section className="flex-1 min-w-0">
+              <SimulationControls
+                symbol={symbol}
+                setSymbol={setSymbol}
+                horizon={horizon}
+                setHorizon={setHorizon}
+                paths={paths}
+                setPaths={setPaths}
+                includeOptions={includeOptions}
+                setIncludeOptions={setIncludeOptions}
+                includeFutures={includeFutures}
+                setIncludeFutures={setIncludeFutures}
+                includeNews={includeNews}
+                setIncludeNews={setIncludeNews}
+                xHandles={xHandles}
+                setXHandles={setXHandles}
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+                showApiKey={showApiKey}
+                setShowApiKey={setShowApiKey}
+                isTraining={isTraining}
+                isPredicting={isPredicting}
+                isSimulating={isSimulating}
+                onPreset={handlePreset}
+                onRunSimulation={runSimulation}
+                onTrainModel={trainModel}
+                onRunPredict={runPredict}
+                onLabelNow={() => labelNow(apiKey)}
+                onLearnNow={() => learnNow(apiKey, symbol)}
+              />
+
+              {/* Sticky row: Simulation Log (left) + Quick & Recent (right) */}
+              <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Simulation Log (sticky) */}
+                <div className="md:col-span-2 md:sticky md:top-4 self-start">
+                  <Card title="Simulation Log" collapsible>
+                    <div
+                      ref={logRef}
+                      className={`${LOG_HEIGHT} overflow-auto text-xs text-gray-400 bg-[#131A23] p-2 rounded`}
+                      aria-label="Simulation log"
+                    >
+                      {logMessages.map((m, i) => (
+                        <div key={i}>{m}</div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={exportArtifact}
+                      className="mt-2 px-3 py-1 rounded bg-[#131A23] border border-[#1B2431] text-sm"
+                      disabled={!art}
+                      aria-label="Export simulation artifact"
+                    >
+                      Export Artifact
+                    </button>
+                  </Card>
+                </div>
+
+                {/* Quick & Recent (sticky, same height as log) */}
+                <div className="md:sticky md:top-4 self-start">
+                  <Card title="Quick & Recent" collapsible>
+                    {/* Quick presets */}
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <button
+                        onClick={() => {
+                          setSymbol("NVDA");
+                          setHorizon(30);
+                        }}
+                        className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition"
+                      >
+                        NVDA · 30d
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSymbol("TSLA");
+                          setHorizon(60);
+                        }}
+                        className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition"
+                      >
+                        TSLA · 60d
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSymbol("BTC-USD");
+                          setHorizon(180);
+                        }}
+                        className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition"
+                      >
+                        BTC · 180d
+                      </button>
+                    </div>
+
+                    {/* Recents list (auto-reads from localStorage "pp_runs") */}
+                    <div className={`${LOG_HEIGHT} overflow-auto divide-y divide-[#1B2431] rounded bg-[#131A23]`}>
+                      {(() => {
+                        let recent: any[] = [];
+                        try {
+                          recent = JSON.parse(localStorage.getItem("pp_runs") || "[]");
+                        } catch {}
+                        if (!recent || recent.length === 0) {
+                          return <div className="text-xs text-gray-400 p-2">No recent runs yet.</div>;
+                        }
+                        return recent.map((r, idx) => (
+                          <button
+                            key={r.id || r.finishedAt || idx}
+                            className="w-full text-left px-3 py-2 hover:bg-[#0E141C] text-sm"
+                            onClick={() => {
+                              if (r.symbol) setSymbol(r.symbol);
+                              if (r.horizon) setHorizon(r.horizon);
+                              if (r.n_paths) setPaths(r.n_paths);
+                            }}
+                            title="Click to load these settings"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">{r.symbol}</span>
+                              <span className="text-gray-400">
+                                {r.finishedAt ? new Date(r.finishedAt).toLocaleString() : ""}
+                              </span>
+                            </div>
+                            <div className="text-gray-300">
+                              {r.horizon ? `${r.horizon}d` : ""} {r.n_paths ? `• ${r.n_paths.toLocaleString()} paths` : ""}
+                              {typeof r.probUp === "number" && (
+                                <span className="ml-2 text-gray-400">· ProbUp {Math.round(r.probUp * 100)}%</span>
+                              )}
+                            </div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  </Card>
+                </div>
+              </section>
+
+              {/* Key metrics */}
+              {art && (
+                <SummaryCard
+                  symbol={art.symbol}
+                  probUp={probUp}
+                  var95={var95}
+                  es95={es95}
+                />
+              )}
+
+              {/* Tabs + charts */}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                <AccessibleTabs
+                  tabs={tabs}
+                  activeId={activeTab}
+                  onChange={(id) => setActiveTab(id as "risk" | "scenarios")}
+                />
+              </motion.div>
+
+              {/* News (optional) — only once */}
+              {includeNews && (
+                <Card title="News" collapsible>
+                  <NewsList
+                    symbol={symbol}
+                    items={newsItems}
+                    loading={newsLoading}
+                    error={newsError}
+                    nextCursor={nextCursor}
+                    onLoadMore={loadMore}
+                  />
+                </Card>
+              )}
+            </section>
+
+            {/* RIGHT: sticky sidebar for quick sims only */}
+            <aside className="hidden lg:block w-80 shrink-0 sticky top-4 max-h-[calc(100vh-5rem)] overflow-y-auto">
+              <QuickSimsPanel
+                presets={QUICK_PRESETS}
+                history={runHistory.map((r) => ({
+                  symbol: r.symbol,
+                  horizon: r.horizon,
+                  paths: r.n_paths,
+                }))}
+                onSelect={({ symbol, horizon, paths }) => {
+                  setSymbol(symbol);
+                  setHorizon(horizon);
+                  setPaths(paths);
                 }}
               />
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => exportChart("fan")}
-                  className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                >
-                  Export
-                </button>
-                <button
-                  onClick={() => shareChart("fan")}
-                  className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                >
-                  Share
-                </button>
-              </div>
-            </Card>
+            </aside>
           </div>
-        )}
-
-        {/* Tabs for Risk / Scenarios */}
-        {art && (
-          <div className="mb-6">
-            <div className="flex border-b border-[#1B2431] rounded-t-2xl overflow-hidden">
-              <button
-                className={`px-4 py-2 ${activeTab === "risk" ? "bg-[#1F2937]" : "bg-[#131A23]"}`}
-                onClick={() => setActiveTab("risk")}
-              >
-                Risk & Evidence
-              </button>
-              <button
-                className={`px-4 py-2 ${activeTab === "scenarios" ? "bg-[#1F2937]" : "bg-[#131A23]"}`}
-                onClick={() => setActiveTab("scenarios")}
-              >
-                Scenarios & Drivers
-              </button>
-            </div>
-
-            <div className="p-4 bg-[#0E141C] rounded-b-2xl border border-[#1B2431] border-t-0">
-              {activeTab === "risk" && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Hit Probability Ribbon */}
-                  <div className="md:col-span-2">
-                    <Card title="Hit Probability Ribbon">
-                      <HitProbabilityRibbon
-                        artifact={{
-                          symbol: art.symbol,
-                          horizon_days: art.horizon_days,
-                          median_path: art.median_path,
-                          bands: {
-                            p05: art.bands.p95_low,
-                            p50: art.bands.p50,
-                            p95: art.bands.p95_high,
-                          },
-                          prob_up_end: art.prob_up_end,
-                          drivers:
-                            art.drivers?.map((d) => ({
-                              name: d.feature,
-                              weight: d.weight,
-                            })) ?? [],
-                        }}
-                        thresholds={[-0.05, 0, 0.05, 0.1]}
-                        S0={S0}
-                        pathMatrixAbove={pathMatrixAbove}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => exportChart("hit")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Export
-                        </button>
-                        <button
-                          onClick={() => shareChart("hit")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Share
-                        </button>
-                      </div>
-                    </Card>
-                  </div>
-
-                  {/* Terminal Distribution */}
-                  <div className="md:col-span-1">
-                    <Card title="Terminal Distribution">
-                      <TerminalDistribution
-                        pathsTerminal={terminalPrices}
-                        ptiles={{
-                          p05: lastOf(art.bands.p95_low),
-                          p50: lastOf(art.bands.p50),
-                          p95: lastOf(art.bands.p95_high),
-                        }}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => exportChart("terminal")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Export
-                        </button>
-                        <button
-                          onClick={() => shareChart("terminal")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Share
-                        </button>
-                      </div>
-                    </Card>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === "scenarios" && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Scenario Tiles */}
-                  <div className="md:col-span-2">
-                    <Card title="Scenario Tiles">
-                      <ScenarioTiles
-                        artifact={{
-                          symbol: art.symbol,
-                          horizon_days: art.horizon_days,
-                          median_path: art.median_path,
-                          bands: {
-                            p05: art.bands.p95_low,
-                            p50: art.bands.p50,
-                            p95: art.bands.p95_high,
-                          },
-                          prob_up_end: art.prob_up_end,
-                          drivers:
-                            art.drivers?.map((d) => ({
-                              name: d.feature,
-                              weight: d.weight,
-                            })) ?? [],
-                        }}
-                        reps={scenarioReps}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => exportChart("scenarios")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Export
-                        </button>
-                        <button
-                          onClick={() => shareChart("scenarios")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Share
-                        </button>
-                      </div>
-                    </Card>
-                  </div>
-
-                  {/* Drivers Waterfall */}
-                  <div className="md:col-span-1">
-                    <Card title="Drivers">
-                      <DriversWaterfall
-                        drivers={drivers.map((d) => ({
-                          name: d.feature,
-                          weight: d.weight,
-                        }))}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => exportChart("drivers")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Export
-                        </button>
-                        <button
-                          onClick={() => shareChart("drivers")}
-                          className="px-2 py-1 rounded bg-[#131A23] border border-[#1B2431]"
-                        >
-                          Share
-                        </button>
-                      </div>
-                    </Card>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </ErrorBoundary>
   );
 }

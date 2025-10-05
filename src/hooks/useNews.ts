@@ -1,113 +1,150 @@
-import { useEffect, useState } from "react"
+// src/hooks/useNews.ts
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type NewsItem = {
-  id?: string
-  title: string
-  url: string
-  published_at: string
-  source?: string
-  sentiment?: number
-  image_url?: string
-}
-export type NewsResponse = { items: NewsItem[]; next_cursor?: string | null }
+  id?: string;
+  url: string;
+  title: string;
+  source?: string;
+  published_at?: string;
+  sentiment?: number;
+  image_url?: string;
+};
 
-type Options = {
-  symbol: string
-  includeNews: boolean
-  limit?: number
-  days?: number
-  getApiKey: () => string | null
-  log?: (msg: string) => void
-}
+type UseNewsOpts = {
+  symbol: string;
+  includeNews: boolean;
+  apiKey: string;
+  limit?: number;
+  days?: number;
+  onLog?: (m: string) => void;
+  retry?: number; // retries on non-200
+};
+
+type HookState = {
+  items: NewsItem[];
+  nextCursor: string | null;
+  loading: boolean;
+  error: string | null;
+};
 
 export function useNews({
   symbol,
   includeNews,
+  apiKey,
   limit = 6,
   days = 7,
-  getApiKey,
-  log = () => {},
-}: Options) {
-  const [items, setItems] = useState<NewsItem[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  onLog,
+  retry = 0,
+}: UseNewsOpts) {
+  const [state, setState] = useState<HookState>({
+    items: [],
+    nextCursor: null,
+    loading: false,
+    error: null,
+  });
 
-  useEffect(() => {
-    let cancelled = false
-    const ctrl = new AbortController()
+  const cursorRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-    if (!includeNews) {
-      setItems([])
-      setNextCursor(null)
-      setLoading(false)
-      setError(null)
-      return () => { cancelled = true; ctrl.abort() }
-    }
+  const canFetch = useMemo(
+    () => includeNews && !!symbol && !!apiKey,
+    [includeNews, symbol, apiKey]
+  );
 
-    // reset on symbol/include toggle
-    setItems([])
-    setNextCursor(null)
-    setError(null)
-    setLoading(true)
+  const reset = useCallback(() => {
+    cursorRef.current = null;
+    setState({ items: [], nextCursor: null, loading: false, error: null });
+  }, []);
 
-    ;(async () => {
-      const key = getApiKey()
-      if (!key) {
-        setLoading(false)
-        setError("Missing API key")
-        log("Error: Please enter a valid API key")
-        return
-      }
-      try {
-        const url = `/api/news/${encodeURIComponent(symbol)}?limit=${limit}&days=${days}`
-        const res = await fetch(url, { headers: { "X-API-Key": key }, signal: ctrl.signal })
-        if (!res.ok) throw new Error(String(res.status))
-        const json = await res.json()
-        const shape: NewsResponse = Array.isArray(json) ? { items: json, next_cursor: null } : json
-        if (cancelled) return
-        setItems(shape.items ?? [])
-        setNextCursor(shape.next_cursor ?? null)
-        const avg = (shape.items?.length ?? 0)
-          ? shape.items.reduce((s, x) => s + (x.sentiment ?? 0), 0) / shape.items.length
-          : 0
-        log(`News loaded: ${shape.items?.length ?? 0} — est. sentiment ${(avg * 100).toFixed(1)}%`)
-      } catch (e: any) {
-        if (!cancelled) {
-          setError(e?.message || "News fetch failed")
-          log(`News fetch error: ${e?.message || e}`)
+  const fetchPage = useCallback(
+    async (append: boolean) => {
+      if (!canFetch || state.loading) return;
+      abortRef.current?.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
+      setState((s) => ({ ...s, loading: true, error: null }));
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      qs.set("days", String(days));
+      if (cursorRef.current) qs.set("cursor", cursorRef.current);
+
+      const url = `/api/news/${encodeURIComponent(symbol)}?${qs.toString()}`;
+      let attempts = 0;
+      while (true) {
+        try {
+          const res = await fetch(url, {
+            headers: { "X-API-Key": apiKey },
+            signal: ctrl.signal,
+          });
+          if (!res.ok) {
+            const txt = await res.text();
+            throw new Error(`HTTP ${res.status} — ${txt || res.statusText}`);
+          }
+          const data = await res.json() as {
+            items?: NewsItem[];
+            next_cursor?: string | null;
+          };
+
+          const newItems = data.items ?? [];
+          const next = data.next_cursor ?? null; // snake_case → camelCase mapping
+
+          setState((s) => ({
+            items: append ? s.items.concat(newItems) : newItems,
+            nextCursor: next,
+            loading: false,
+            error: null,
+          }));
+          cursorRef.current = next;
+          onLog?.(
+            `News: fetched ${newItems.length} item(s)${
+              next ? ` (next_cursor=${next})` : " (end)"
+            }`
+          );
+          return;
+        } catch (e: any) {
+          attempts++;
+          if (attempts > retry || ctrl.signal.aborted) {
+            setState((s) => ({
+              ...s,
+              loading: false,
+              error: e?.message || String(e),
+            }));
+            onLog?.(`News error: ${e?.message || e}`);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 400 * attempts));
         }
-      } finally {
-        if (!cancelled) setLoading(false)
       }
-    })()
+    },
+    [apiKey, canFetch, days, limit, onLog, retry, state.loading, symbol]
+  );
 
-    return () => { cancelled = true; ctrl.abort() }
-  }, [symbol, includeNews, limit, days, getApiKey, log])
-
-  const loadMore = async () => {
-    if (!nextCursor) return
-    const key = getApiKey()
-    if (!key) { setError("Missing API key"); return }
-    try {
-      setLoading(true)
-      const url = `/api/news/${encodeURIComponent(symbol)}?limit=${limit}&days=${days}&cursor=${encodeURIComponent(nextCursor)}`
-      const res = await fetch(url, { headers: { "X-API-Key": key } })
-      if (!res.ok) throw new Error(String(res.status))
-      const data: NewsResponse = await res.json()
-      setItems(prev => {
-        const seen = new Set(prev.map(x => x.id ?? x.url))
-        const fresh = (data.items ?? []).filter(x => !seen.has(x.id ?? x.url))
-        return [...prev, ...fresh]
-      })
-      setNextCursor(data.next_cursor ?? null)
-    } catch (e: any) {
-      setError(e?.message || "News fetch failed")
-      log(`News fetch error: ${e?.message || e}`)
-    } finally {
-      setLoading(false)
+  // initial & dependency changes
+  useEffect(() => {
+    if (!includeNews) {
+      reset();
+      return;
     }
-  }
+    if (canFetch) fetchPage(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeNews, symbol, apiKey, limit, days]);
 
-  return { items, nextCursor, loading, error, loadMore }
+  // cleanup on unmount
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
+  const loadMore = useCallback(() => {
+    if (state.nextCursor) fetchPage(true);
+  }, [fetchPage, state.nextCursor]);
+
+  return {
+    items: state.items,
+    nextCursor: state.nextCursor,
+    loading: state.loading,
+    error: state.error,
+    loadMore,
+  };
 }

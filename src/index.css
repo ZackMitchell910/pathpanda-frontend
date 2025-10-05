@@ -13,6 +13,41 @@
     grid-template-columns: 1fr;
   }
 }
+/* Path Panda base */
+:root {
+  --panda-bg: #000000;
+  --panda-panel: #0d0d0d;
+  --panda-border: #1a1a1a;
+  --panda-text: #f9fafb;
+  --panda-text-dim: #d1d5db;
+  --panda-placeholder: #9ca3af;
+}
+
+/* Inputs on dark */
+input::placeholder,
+textarea::placeholder {
+  color: var(--panda-placeholder);
+  opacity: 0.85;
+}
+
+/* Optional: nicer focus ring */
+input, select, textarea, button {
+  outline: none;
+}
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #273141 transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background-color: #273141;
+  border-radius: 8px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
 
 button {
   min-width: 48px;
