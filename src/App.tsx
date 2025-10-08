@@ -1,5 +1,3 @@
-"use client";
-
 import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from "react";
 import { motion } from "framer-motion";
 import { Toaster } from "react-hot-toast";
@@ -8,38 +6,37 @@ import html2canvas from "html2canvas";
 import "chart.js/auto";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 
-import { throttle } from "../utils/throttle";
-import { encodeState } from "../utils/stateShare";
+import { throttle } from "./utils/throttle";
+import { encodeState } from "./utils/stateShare";
 
-import { Card } from "../components/ui/Card";
-import { NewsList } from "../components/NewsList";
-import { useNews } from "../hooks/useNews";
-import { InlineLegend } from "../components/InlineLegend";
-import { ChartActions } from "../components/ChartActions";
-import { SummaryCard } from "../components/SummaryCard";
-import { SimulationControls } from "../components/SimulationControls";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import { ChallengePanel } from "../components/ChallengePanel";
-import RightRail from "../components/RightRail";
-import { TrackRecordPanel } from "../components/TrackRecordPanel";
-import { PP_COLORS } from "../theme/chartTheme";
+import { Card } from "./components/ui/Card";
+import { NewsList } from "./components/NewsList";
+import { useNews } from "./hooks/useNews";
+import { InlineLegend } from "./components/InlineLegend";
+import { ChartActions } from "./components/ChartActions";
+import { SummaryCard } from "./components/SummaryCard";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ChallengePanel } from "./components/ChallengePanel";
+import RightRail from "./components/RightRail";
+import { TrackRecordPanel } from "./components/TrackRecordPanel";
+import { PP_COLORS } from "./theme/chartTheme";
 
 // Lazy chunked charts/add-ons
-const FanChart = React.lazy(() => import("../components/FanChart"));
+const FanChart = React.lazy(() => import("./components/FanChart"));
 const HitProbabilityRibbon = React.lazy(() =>
-  import("../components/PredictiveAddOns").then((m) => ({ default: m.HitProbabilityRibbon }))
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.HitProbabilityRibbon }))
 );
 const TerminalDistribution = React.lazy(() =>
-  import("../components/PredictiveAddOns").then((m) => ({ default: m.TerminalDistribution }))
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.TerminalDistribution }))
 );
 const ScenarioTiles = React.lazy(() =>
-  import("../components/PredictiveAddOns").then((m) => ({ default: m.ScenarioTiles }))
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.ScenarioTiles }))
 );
 const DriversWaterfall = React.lazy(() =>
-  import("../components/PredictiveAddOns").then((m) => ({ default: m.DriversWaterfall }))
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.DriversWaterfall }))
 );
 const TargetLadder = React.lazy(() =>
-  import("../components/PredictiveAddOns").then((m) => ({ default: m.TargetLadder }))
+  import("./components/PredictiveAddOns").then((m) => ({ default: m.TargetLadder }))
 );
 
 const ChartFallback: React.FC = () => <div className="text-xs text-gray-400">Loading chart…</div>;
@@ -78,14 +75,12 @@ interface RunSummary {
   q50?: number | null;
   probUp?: number | null;
 }
-console.info("[PathPanda] API_BASE =", API_BASE);
 
 // ---- API base + helpers ----
 const API_BASE =
   (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||    // <— primary
-  (import.meta as any)?.env?.VITE_API_BASE ||          // <— your existing var
-  process.env.NEXT_PUBLIC_BACKEND_URL ||               // Next-style, harmless fallback
+  (import.meta as any)?.env?.VITE_PREDICTIVE_API || // primary (Netlify var)
+  (import.meta as any)?.env?.VITE_API_BASE ||       // your existing var (if present)
   "";
 
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : p);
@@ -96,7 +91,11 @@ const apiHeaders = (key: string) => ({
 });
 
 async function safeText(r: Response) {
-  try { return await r.text(); } catch { return "<no body>"; }
+  try {
+    return await r.text();
+  } catch {
+    return "<no body>";
+  }
 }
 
 function looksLikeHTML(s: string) {
@@ -109,7 +108,7 @@ const PandaIcon = () => (
   </svg>
 );
 
-export default function Page() {
+export default function App() {
   // —— UI state ——
   const getInitialTheme = (): "dark" | "light" => {
     const savedTheme = typeof window !== "undefined" ? localStorage.getItem("theme") || "dark" : "dark";
@@ -163,6 +162,11 @@ export default function Page() {
 
   const logRef = useRef<HTMLDivElement | null>(null);
 
+  // helpful runtime check
+  useEffect(() => {
+    console.info("[PathPanda] API_BASE =", API_BASE || "(empty; using relative URLs)");
+  }, []);
+
   // —— Derived ——
   const horizonNum = typeof horizon === "number" ? horizon : null;
 
@@ -187,7 +191,7 @@ export default function Page() {
     days: 7,
     onLog: throttledLog,
     retry: 0,
-    // IMPORTANT: ensure your hook also uses the absolute api() base inside if it fetches server routes
+    // ensure the hook also uses api() internally for any server routes it calls
   });
 
   useEffect(() => {
@@ -205,9 +209,7 @@ export default function Page() {
   }, [apiKey]);
 
   useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logMessages]);
 
   useEffect(() => {
@@ -248,19 +250,6 @@ export default function Page() {
     setHorizon(preset.horizon);
     setPaths(preset.paths);
   };
-
-  // —— Target ladder derived (used in exports too) ——
-  const S0 = art?.median_path?.[0]?.[1] ?? 0;
-  const targetLadderData = useMemo(() => {
-    const hp = art?.hit_probs;
-    if (!hp) return [];
-    const lastT = art?.median_path?.length ? art.median_path.length - 1 : 0;
-    const labels = ["-5%", "0%", "+5%", "+10%"];
-    return hp.thresholds_abs.map((thr, i) => ({
-      label: labels[i] ?? `${Math.round(((thr / (S0 || 1)) - 1) * 100)}%`,
-      p: hp.probs_by_day?.[i]?.[lastT] ?? 0,
-    }));
-  }, [art, S0]);
 
   const eod = art?.eod_estimate ?? null;
 
@@ -311,7 +300,6 @@ export default function Page() {
         link.download = `${chartId}.png`;
         link.click();
       }
-      // CSV sidecar for key charts
       if (art && ["fan", "hit", "terminal", "drivers", "ladder"].includes(chartId)) {
         let csvData: string[][] = [];
         switch (chartId) {
@@ -378,7 +366,7 @@ export default function Page() {
       const r = await fetch(api("/outcomes/label"), { method: "POST", headers: apiHeaders(apiKey) });
       if (!r.ok) {
         const body = await safeText(r);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`HTTP ${r.status} ${body}`);
       }
       const data = await r.json();
@@ -398,7 +386,7 @@ export default function Page() {
       });
       if (!r.ok) {
         const body = await safeText(r);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`HTTP ${r.status} ${body}`);
       }
       const data = await r.json();
@@ -422,7 +410,7 @@ export default function Page() {
       });
       if (!resp.ok) {
         const body = await safeText(resp);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`Train failed: ${resp.status} – ${body}`);
       }
       throttledLog("Model trained successfully.");
@@ -446,7 +434,7 @@ export default function Page() {
       });
       if (!resp.ok) {
         const body = await safeText(resp);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`Predict failed: ${resp.status} – ${body}`);
       }
       const js = await resp.json();
@@ -461,11 +449,12 @@ export default function Page() {
       throttledLog("Error: Please enter a valid API key");
       return;
     }
-    if (horizonNum == null) {
+    const hNum = typeof horizon === "number" ? horizon : null;
+    if (hNum == null) {
       throttledLog("Error: Please enter a horizon (days).");
       return;
     }
-    if (horizonNum > 365) {
+    if (hNum > 365) {
       throttledLog("Error: Horizon must be ≤ 365 days.");
       return;
     }
@@ -481,7 +470,7 @@ export default function Page() {
     try {
       const payload: any = {
         symbol: symbol.toUpperCase(),
-        horizon_days: Number(horizonNum),
+        horizon_days: Number(hNum),
         n_paths: Number(paths),
         timespan: "day",
         include_news: !!includeNews,
@@ -498,7 +487,7 @@ export default function Page() {
       });
       if (!resp.ok) {
         const body = await safeText(resp);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`HTTP ${resp.status} – ${body}`);
       }
       const { run_id } = await resp.json();
@@ -541,7 +530,7 @@ export default function Page() {
       const a = await fetch(api(`/simulate/${run_id}/artifact`), { headers: apiHeaders(apiKey) });
       if (!a.ok) {
         const body = await safeText(a);
-        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API_BASE or proxy.");
+        if (looksLikeHTML(body)) throw new Error("Misrouted to HTML (likely Netlify 404). Check API base or proxy.");
         throw new Error(`Artifact fetch failed: ${a.status} – ${body}`);
       }
       const artf: MCArtifact = await a.json();
@@ -555,7 +544,7 @@ export default function Page() {
           {
             id: run_id,
             symbol,
-            horizon: horizonNum ?? 0,
+            horizon: hNum,
             n_paths: paths,
             finishedAt: new Date().toISOString(),
             q50: artf.bands.p50?.[artf.bands.p50.length - 1]?.[1] ?? null,
@@ -792,8 +781,16 @@ export default function Page() {
         <Card title="Target Ladder" actions={<ChartActions onExport={() => exportChart("ladder")} />}>
           <div data-chart="ladder">
             <Suspense fallback={<ChartFallback />}>
-              {targetLadderData?.length ? (
-                <TargetLadder items={targetLadderData} />
+              {art?.hit_probs ? (
+                <TargetLadder
+                  items={(art.hit_probs.thresholds_abs || []).map((thr, i) => {
+                    const lastT = art.median_path.length - 1;
+                    const p = art.hit_probs!.probs_by_day?.[i]?.[lastT] ?? 0;
+                    const S0 = art.median_path?.[0]?.[1] ?? 0;
+                    const pct = S0 ? Math.round(((thr / S0) - 1) * 100) : 0;
+                    return { label: `${pct >= 0 ? "+" : ""}${pct}%`, p };
+                  })}
+                />
               ) : (
                 <div className="text-xs opacity-70">Run a simulation to populate the ladder.</div>
               )}
@@ -828,7 +825,7 @@ export default function Page() {
         </Card>
 
         <Card title="Track Record">
-          <TrackRecordPanel runs={runHistory} onExportArtifact={() => exportArtifact(art)} />
+          <TrackRecordPanel runs={runHistory} />
         </Card>
 
         <Card title="News">
