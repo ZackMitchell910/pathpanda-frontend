@@ -3,6 +3,9 @@
 import { motion } from "framer-motion";
 import HeroFanChart from "@/components/marketing/HeroFanChartLanding;"
 import LogoTwinCore from "@/components/branding/LogoTwinCore";
+import BackgroundOrbs from "@/components/marketing/BackgroundOrbs";
+import NavBar from "@/components/marketing/NavBar";
+
 
 
 const gradientBg =
@@ -16,6 +19,8 @@ export default function Home() {
         <LogoTwinCore size={28} />
         <span className="tracking-wide font-semibold">SIMETRIX</span>
       </div>
+      <main className="relative min-h-screen bg-[#0A111A] text-[#F9F8F3]">
+      <BackgroundOrbs />
       {/* Nav */}
       <header className="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
