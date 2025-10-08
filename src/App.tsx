@@ -77,12 +77,13 @@ interface RunSummary {
 }
 
 // ---- API base + helpers ----
-const API_BASE =
+const RAW_API_BASE =
   (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API || // primary (Netlify var)
+  (import.meta as any)?.env?.VITE_PREDICTIVE_API || // Netlify (Vite) var
   (import.meta as any)?.env?.VITE_API_BASE ||       // your existing var (if present)
-  "";
+  "https://pathpanda-api.onrender.com";            // <-- TEMP hard fallback so calls don't hit Netlify
 
+const API_BASE = RAW_API_BASE ? RAW_API_BASE.replace(/\/+$/, "") : "";
 const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : p);
 
 const apiHeaders = (key: string) => ({

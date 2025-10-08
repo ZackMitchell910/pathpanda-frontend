@@ -1,5 +1,15 @@
 // src/hooks/useNews.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// hooks/useNews.ts (inside your fetcher)
+const API_BASE =
+  (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
+  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "";
+
+const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : p);
+
+// then use: fetch(api(`/api/news/${symbol}?limit=${limit}&days=${days}`), { headers: … })
 
 export type NewsItem = {
   id?: string;
