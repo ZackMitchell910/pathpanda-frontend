@@ -1,0 +1,57 @@
+# netlify.toml — PathPanda frontend
+# Replace the domain below if your backend URL differs
+# Order matters: API routes first, then the SPA catch-all
+
+[[redirects]]
+  from = "/simulate/*"
+  to   = "https://pathpanda-api.onrender.com/simulate/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/predict"
+  to   = "https://pathpanda-api.onrender.com/predict"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/train"
+  to   = "https://pathpanda-api.onrender.com/train"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/outcomes/*"
+  to   = "https://pathpanda-api.onrender.com/outcomes/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/learn/*"
+  to   = "https://pathpanda-api.onrender.com/learn/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/api/*"
+  to   = "https://pathpanda-api.onrender.com/api/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/options/*"
+  to   = "https://pathpanda-api.onrender.com/options/:splat"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/futures/*"
+  to   = "https://pathpanda-api.onrender.com/futures/:splat"
+  status = 200
+  force  = true
+
+# SPA fallback (keep LAST)
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
