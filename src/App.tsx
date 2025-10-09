@@ -851,14 +851,19 @@ export default function App() {
             )}
           </ErrorBoundary>
         </Card>
-
         <Card title="Challenges">
           <ErrorBoundary>
-            <ChallengePanel />
+            <ChallengePanel
+              symbol={symbol}
+              actualPrice={
+                typeof currentPrice === "number" && Number.isFinite(currentPrice)
+                  ? currentPrice
+                  : undefined
+              }
+            />
           </ErrorBoundary>
         </Card>
       </div>
-
       {/* Right rail */}
       <RightRail />
 
