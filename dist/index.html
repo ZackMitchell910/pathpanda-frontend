@@ -4,12 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PathPanda - Predictive Market Dashboard</title>
-  <script type="module" crossorigin src="/assets/index-BsQbO9um.js"></script>
+  <script type="module" crossorigin src="/assets/index-CH_w3-YA.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/chart-vendor-BU4MQjjG.js">
   <link rel="modulepreload" crossorigin href="/assets/react-vendor-DleeSAZV.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-DToQKEC2.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-DWlUXz9X.css">
 </head>
 <body>
+  <script>
+    addEventListener('error', e => {
+      const el = document.createElement('pre');
+      el.textContent = 'Runtime error: ' + (e?.error?.stack || e.message);
+      el.style.cssText='position:fixed;left:8px;bottom:8px;background:#111;color:#f66;padding:8px;z-index:99999;max-width:90vw;max-height:40vh;overflow:auto;font:12px monospace';
+      document.body.appendChild(el);
+    });
+    addEventListener('unhandledrejection', e => {
+      const el = document.createElement('pre');
+      el.textContent = 'Unhandled promise: ' + (e?.reason?.stack || e.reason);
+      el.style.cssText='position:fixed;left:8px;bottom:8px;background:#111;color:#f66;padding:8px;z-index:99999;max-width:90vw;max-height:40vh;overflow:auto;font:12px monospace';
+      document.body.appendChild(el);
+    });
+  </script>
   <div id="root"></div>
 </body>
 </html>
