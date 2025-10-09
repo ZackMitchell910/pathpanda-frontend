@@ -1,1 +1,12 @@
-﻿# (paste the TOML content from above)
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback for Vite
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
