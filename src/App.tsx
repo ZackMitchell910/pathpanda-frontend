@@ -78,14 +78,18 @@ interface RunSummary {
 }
 
 // ---- API base + helpers (hard fallback so calls never hit Netlify) ----
+// ---- API base + helpers (Vite/Netlify + safe in browser) ----
 const RAW_API_BASE =
   (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API || // Vite (Netlify)
-  (import.meta as any)?.env?.VITE_API_BASE ||       // existing fallback if present
-  "https://pathpanda-api.onrender.com";            // TEMP hard fallback
+  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
+  (import.meta as any)?.env?.VITE_API_BASE ||
+  // Only read process.env if it exists (Next.js builds); safe in browser:
+  (typeof process !== "undefined" && (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL) ||
+  // hard fallback so calls never hit Netlify
+  "https://pathpanda-api.onrender.com";
 
-const API_BASE = RAW_API_BASE ? RAW_API_BASE.replace(/\/+$/, "") : "";
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : p);
+const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+const api = (p: string) => `${API_BASE}${p}`;
 
 const apiHeaders = (key: string) => ({
   "Content-Type": "application/json",

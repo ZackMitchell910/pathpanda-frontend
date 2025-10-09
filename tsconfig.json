@@ -18,13 +18,13 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
 
-    "baseUrl": "src",
-    "paths": { "@/*": ["*"] },
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
 
     "types": ["vite/client", "node"],
     "skipLibCheck": true
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }
