@@ -4,6 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";            // dashboard
 import Landing from "@/landing/Landing";  // formerly HomePage
 import "./index.css";
+import "@/debug/hookGlobalErrors";
+
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

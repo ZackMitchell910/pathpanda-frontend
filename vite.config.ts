@@ -12,5 +12,6 @@ export default defineConfig({
   // (Optional) If some third-party code expects `process.env` in the browser:
   define: {
     "process.env": {},
+  build: { sourcemap: true }
   },
 });
