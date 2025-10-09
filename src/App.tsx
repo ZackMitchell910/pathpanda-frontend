@@ -265,6 +265,7 @@ export default function App() {
     }
   }, [isSimulating]);
 
+  // Run actions
   const handleRunPredictClick = useCallback(async () => {
     if (isPredicting) return;
     setIsPredicting(true);
@@ -273,7 +274,7 @@ export default function App() {
     } finally {
       setIsPredicting(false);
     }
-  }, [isPredicting]);
+  }, [isPredicting, runPredict]);
 
   const handleTrainModelClick = useCallback(async () => {
     if (isTraining) return;
@@ -283,81 +284,158 @@ export default function App() {
     } finally {
       setIsTraining(false);
     }
-  }, [isTraining]);
+  }, [isTraining, trainModel]);
 
-  // —— Export / Share ——
-  const exportChart = async (chartId: string) => {
+  // ---------------- Export / Share ----------------
+  type ChartKind = "fan" | "hit" | "terminal" | "drivers" | "ladder";
+
+  function downloadCSV(rows: (string | number)[][], filename: string) {
+    const csv = rows
+      .map(r =>
+        r
+          .map(x =>
+            typeof x === "string" && x.includes(",")
+              ? `"${x.replace(/"/g, '""')}"`
+              : String(x)
+          )
+          .join(",")
+      )
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadPNG(canvas: HTMLCanvasElement, filename: string) {
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+  }
+
+  // Build ladder rows once (used by export + UI)
+  function buildLadderItems(art: MCArtifact) {
+    if (!art?.hit_probs?.thresholds_abs?.length) return [];
+    const lastT = art.median_path.length - 1;
+    const S0 = art.median_path?.[0]?.[1] ?? 0;
+    return art.hit_probs.thresholds_abs.map((thr, i) => {
+      const p = art.hit_probs!.probs_by_day?.[i]?.[lastT] ?? 0;
+      const pct = S0 ? Math.round((thr / S0 - 1) * 100) : 0;
+      return { label: `${pct >= 0 ? "+" : ""}${pct}%`, p };
+    });
+  }
+
+  // Export the currently rendered chart (PNG + CSV when available)
+  const exportChart = async (kind: ChartKind) => {
     try {
-      const container = document.querySelector(`[data-chart="${chartId}"]`) as HTMLElement | null;
-      if (container) {
-        const canvas = container.querySelector("canvas") as HTMLCanvasElement | null;
-        const element = canvas ?? container;
-        const screenshot = await html2canvas(element, {
-          backgroundColor: theme === "dark" ? "#0A111A" : "#F3F4F6",
+      // 1) Try to grab a canvas for PNG
+      const container = document.querySelector(`[data-chart="${kind}"]`) as HTMLElement | null;
+      const canvas = container?.querySelector("canvas") as HTMLCanvasElement | null;
+
+      // 2) Build CSV rows by chart kind
+      let csv: (string | number)[][] = [];
+
+      if (kind === "fan" && art) {
+        csv = [["Day", "Median"]];
+        for (const [d, v] of art.median_path) csv.push([d, v]);
+      }
+
+      if (kind === "hit" && art?.hit_probs) {
+        const lastIdx = art.median_path.length - 1;
+        csv = [["Threshold", "Probability"]];
+        (art.hit_probs.thresholds_abs || []).forEach((thr, i) => {
+          const p = art.hit_probs!.probs_by_day?.[i]?.[lastIdx] ?? 0;
+          csv.push([thr, p]);
         });
-        const url = screenshot.toDataURL("image/png");
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${chartId}.png`;
-        link.click();
       }
-      if (art && ["fan", "hit", "terminal", "drivers", "ladder"].includes(chartId)) {
-        let csvData: string[][] = [];
-        switch (chartId) {
-          case "fan":
-            csvData = [
-              ["Day", "Median", "P80 Low", "P80 High", "P95 Low", "P95 High"],
-              ...art.median_path.map(([t], i) => [
-                `D${t}`,
-                art.median_path[i][1].toFixed(2),
-                art.bands.p80_low[i][1].toFixed(2),
-                art.bands.p80_high[i][1].toFixed(2),
-                art.bands.p95_low[i][1].toFixed(2),
-                art.bands.p95_high[i][1].toFixed(2),
-              ]),
-            ];
-            break;
-          case "hit":
-            csvData = [
-              ["Day", ...(art.hit_probs?.thresholds_abs.map((t) => `Above ${t.toFixed(2)}`) || [])],
-              ...art.median_path.map(([t], i) => [
-                `D${t}`,
-                ...(art.hit_probs?.probs_by_day.map((probs) => probs[i]?.toFixed(2) || "0") || []),
-              ]),
-            ];
-            break;
-          case "terminal":
-            csvData = [["Price", "Frequency"], ...(art.terminal_prices?.map((p) => [p.toFixed(2), "1"]) || [])];
-            break;
-          case "drivers":
-            csvData = [["Driver", "Weight"], ...drivers.map((d) => [d.feature, d.weight.toFixed(2)])];
-            break;
-          case "ladder":
-            csvData = [["Target", "Probability"], ...targetLadderData.map((d) => [d.label, (d.p * 100).toFixed(2)])];
-            break;
-        }
-        if (csvData.length) {
-          const csv = csvData.map((row) => row.join(",")).join("\n");
-          const blob = new Blob([csv], { type: "text/csv" });
-          const csvLink = document.createElement("a");
-          csvLink.href = URL.createObjectURL(blob);
-          csvLink.download = `${chartId}.csv`;
-          csvLink.click();
-        }
-        toast.success(`Exported ${chartId} as PNG and CSV`);
-      } else {
+
+      if (kind === "terminal" && art?.terminal_prices?.length) {
+        csv = [["Price"]];
+        art.terminal_prices.forEach(p => csv.push([p]));
+      }
+
+      if (kind === "drivers" && drivers?.length) {
+        csv = [["Feature", "Weight"]];
+        drivers.forEach(d => csv.push([(d.name ?? (d as any).feature) as string, d.weight]));
+      }
+
+      if (kind === "ladder" && art) {
+        const items = buildLadderItems(art);
+        csv = [["Target", "Probability"]];
+        items.forEach(d => csv.push([d.label, d.p]));
+      }
+
+      // 3) Do PNG (if a canvas is present)
+      if (canvas) {
+        const pngName = `${kind}_${art?.symbol ?? "chart"}.png`;
+        downloadPNG(canvas, pngName);
+      }
+
+      // 4) Do CSV (if we have any rows)
+      if (csv.length > 1) {
+        const csvName = `${kind}_${art?.symbol ?? "data"}.csv`;
+        downloadCSV(csv, csvName);
+        toast.success(`Exported ${kind.toUpperCase()} as ${canvas ? "PNG and " : ""}CSV`);
+        return;
+      }
+
+      // 5) If no data at all
+      if (!canvas) {
         toast.error("No data available for export");
+      } else {
+        toast.success(`Exported ${kind.toUpperCase()} as PNG`);
       }
-    } catch (e: any) {
-      toast.error(`Export failed: ${e.message || e}`);
+    } catch (err) {
+      console.error(err);
+      toast.error("Export failed");
     }
   };
 
-  const shareChart = (chartId: string) => {
-    const state = encodeState({ symbol, horizon, paths, chartId });
-    const url = `${window.location.origin}/share?state=${state}`;
-    navigator.clipboard.writeText(url);
-    toast.success("Shareable link copied!");
+  // Share using Web Share API / Clipboard as a fallback
+  const shareChart = async (kind: ChartKind) => {
+    try {
+      const container = document.querySelector(`[data-chart="${kind}"]`) as HTMLElement | null;
+      const canvas = container?.querySelector("canvas") as HTMLCanvasElement | null;
+      if (!canvas) {
+        toast.error("Nothing to share yet");
+        return;
+      }
+      const blob = await (await fetch(canvas.toDataURL("image/png"))).blob();
+
+      // Web Share Level 2 (files)
+      if ((navigator as any).canShare && (navigator as any).share) {
+        const file = new File([blob], `${kind}.png`, { type: "image/png" });
+        if ((navigator as any).canShare({ files: [file] })) {
+          await (navigator as any).share({
+            title: `Sim chart: ${kind}`,
+            text: `${art?.symbol ?? ""} ${kind}`,
+            files: [file],
+          });
+          return;
+        }
+      }
+
+      // Clipboard fallback
+      if (navigator.clipboard && "write" in navigator.clipboard) {
+        const item = new ClipboardItem({ "image/png": blob });
+        // @ts-ignore
+        await navigator.clipboard.write([item]);
+        toast.success("Chart copied to clipboard");
+        return;
+      }
+
+      // Last resort: download
+      downloadPNG(canvas, `${kind}_${art?.symbol ?? "chart"}.png`);
+      toast.success("Downloaded chart PNG");
+    } catch (e) {
+      console.error(e);
+      toast.error("Share failed");
+    }
   };
 
   // —— Backend calls ——
@@ -732,18 +810,30 @@ export default function App() {
           <div data-chart="fan">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art ? <FanChart artifact={art} /> : <div className="text-xs opacity-70">Run a simulation to view.</div>}
+                {art ? (
+                  <FanChart data={art} />
+                ) : (
+                  <div className="text-xs opacity-70">Run a simulation to view.</div>
+                )}
               </Suspense>
             </ErrorBoundary>
             {art && (
               <div className="mt-2">
-                <InlineLegend />
+                <InlineLegend
+                  items={[
+                    { swatch: PP_COLORS.median, label: "Median" },
+                    { swatch: PP_COLORS.p80, label: "80% Range" },
+                  ]}
+                />
               </div>
             )}
           </div>
         </Card>
 
-        <Card title="Hit Probabilities" actions={<ChartActions onExport={() => exportChart("hit")} />}>
+        <Card
+          title="Hit Probabilities"
+          actions={<ChartActions onExport={() => exportChart("hit")} onShare={() => shareChart("hit")} />}
+        >
           <div data-chart="hit">
             <Suspense fallback={<ChartFallback />}>
               {art?.hit_probs ? (
@@ -755,7 +845,10 @@ export default function App() {
           </div>
         </Card>
 
-        <Card title="Terminal Distribution" actions={<ChartActions onExport={() => exportChart("terminal")} />}>
+        <Card
+          title="Terminal Distribution"
+          actions={<ChartActions onExport={() => exportChart("terminal")} onShare={() => shareChart("terminal")} />}
+        >
           <div data-chart="terminal">
             <Suspense fallback={<ChartFallback />}>
               {art?.terminal_prices?.length ? (
@@ -767,7 +860,10 @@ export default function App() {
           </div>
         </Card>
 
-        <Card title="Drivers (Explainability)" actions={<ChartActions onExport={() => exportChart("drivers")} />}>
+        <Card
+          title="Drivers (Explainability)"
+          actions={<ChartActions onExport={() => exportChart("drivers")} onShare={() => shareChart("drivers")} />}
+        >
           <div data-chart="drivers">
             <Suspense fallback={<ChartFallback />}>
               {drivers?.length ? (
@@ -779,19 +875,22 @@ export default function App() {
           </div>
         </Card>
 
-        <Card title="Target Ladder" actions={<ChartActions onExport={() => exportChart("ladder")} />}>
+        <Card
+          title="Target Ladder"
+          actions={<ChartActions onExport={() => exportChart("ladder")} onShare={() => shareChart("ladder")} />}
+        >
           <div data-chart="ladder">
             <Suspense fallback={<ChartFallback />}>
-              {art?.hit_probs ? (
-                <TargetLadder
-                  items={(art.hit_probs.thresholds_abs || []).map((thr, i) => {
-                    const lastT = art.median_path.length - 1;
-                    const p = art.hit_probs!.probs_by_day?.[i]?.[lastT] ?? 0;
-                    const S0 = art.median_path?.[0]?.[1] ?? 0;
-                    const pct = S0 ? Math.round(((thr / S0) - 1) * 100) : 0;
-                    return { label: `${pct >= 0 ? "+" : ""}${pct}%`, p };
-                  })}
-                />
+              {art ? (
+                <div className="mt-2">
+                  <InlineLegend
+                    items={[
+                      { swatch: PP_COLORS.median, label: "Median" },
+                      { swatch: PP_COLORS.p80, label: "80% Range" },
+                    ]}
+                  />
+                  {/* TODO: render ladder viz here (or pass computed items into your TargetLadder component) */}
+                </div>
               ) : (
                 <div className="text-xs opacity-70">Run a simulation to populate the ladder.</div>
               )}
@@ -826,19 +925,26 @@ export default function App() {
         </Card>
 
         <Card title="Track Record">
-          <TrackRecordPanel runs={runHistory} />
+          <TrackRecordPanel />
         </Card>
 
         <Card title="News">
           {includeNews ? (
-            <NewsList items={newsItems} loading={newsLoading} error={newsError} onLoadMore={loadMore} nextCursor={nextCursor} />
+            <NewsList
+              items={newsItems}
+              loading={newsLoading}
+              error={newsError}
+              onLoadMore={loadMore}
+              nextCursor={nextCursor}
+              symbol={symbol}
+            />
           ) : (
             <div className="text-xs opacity-70">Enable “Include news” to fetch recent headlines.</div>
           )}
         </Card>
 
         <Card title="Challenges">
-          <ChallengePanel />
+          <ChallengePanel symbol={symbol} userPrediction={userPrediction} />
         </Card>
       </div>
 
@@ -857,7 +963,6 @@ export default function App() {
       </div>
     </main>
   );
-}
 
 // —— Utilities ——
 function exportArtifact(art: MCArtifact | null) {
@@ -870,4 +975,289 @@ function exportArtifact(art: MCArtifact | null) {
   a.click();
   URL.revokeObjectURL(url);
   toast.success("Exported artifact as JSON");
+}
+  const terminalPrices = art?.terminal_prices ?? [];
+  const var95 = art?.var_es?.var95 ?? 0;
+  const es95 = art?.var_es?.es95 ?? 0;
+  const S0 = art?.median_path?.[0]?.[1] ?? 0;
+
+  const pathMatrixAbove = (tIndex: number, thresholdAbs: number) => {
+    const hp = art?.hit_probs;
+    if (!hp) return 0;
+    let best = 0, bestDiff = Infinity;
+    hp.thresholds_abs.forEach((thr, i) => {
+      const diff = Math.abs(thr - thresholdAbs);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    });
+    return hp.probs_by_day?.[best]?.[tIndex] ?? 0;
+  };
+
+  const targetLadderData = useMemo(() => {
+    const hp = art?.hit_probs;
+    if (!hp) return [];
+    const lastT = art?.median_path?.length ? art.median_path.length - 1 : 0;
+    const labels = ["-5%", "0%", "+5%", "+10%"];
+    return hp.thresholds_abs.map((thr, i) => ({
+      label: labels[i] ?? `${Math.round(((thr / (S0 || 1)) - 1) * 100)}%`,
+      p: hp.probs_by_day?.[i]?.[lastT] ?? 0,
+    }));
+  }, [art, S0]);
+
+  const scenarioReps = art
+    ? [
+        { label: "Bear (≈p05)", path: art.bands.p95_low },
+        { label: "Base (p50)",  path: art.median_path },
+        { label: "Bull (≈p95)", path: art.bands.p95_high },
+      ]
+    : [];
+
+  // --- Tabs (now using Card `actions` slot) ---
+  const tabs = art
+    ? [
+        {
+          id: "risk",
+          label: "Risk",
+          content: (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Price Forecast */}
+              <motion.div className="md:col-span-2" initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3 }}>
+                <Card title="Price Forecast" collapsible actions={<ChartActions onExport={() => exportChart("fan")} onShare={() => shareChart("fan")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <FanChart data={art} />
+                  </Suspense>
+                </Card>
+              </motion.div>
+
+              {/* Hit Probabilities */}
+              <motion.div initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
+                <Card title="Hit Probabilities" collapsible actions={<ChartActions onExport={() => exportChart("hit")} onShare={() => shareChart("hit")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <HitProbabilityRibbon
+                      artifact={{ symbol: art.symbol, horizon_days: art.horizon_days, median_path: art.median_path, bands: art.bands }}
+                      thresholds={[-0.05, 0, 0.05, 0.1]}
+                      S0={S0}
+                      pathMatrixAbove={pathMatrixAbove}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
+
+              {/* Outcomes at Horizon */}
+              <motion.div initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
+                <Card title="Outcomes at Horizon" collapsible actions={<ChartActions onExport={() => exportChart("terminal")} onShare={() => shareChart("terminal")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <TerminalDistribution
+                      pathsTerminal={terminalPrices}
+                      ptiles={{ p05: art.bands.p95_low.at(-1)?.[1], p50: art.bands.p50.at(-1)?.[1], p95: art.bands.p95_high.at(-1)?.[1] }}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
+
+              {/* Target Ladder */}
+              <motion.div initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3, delay: 0.3 }}>
+                <Card title="Target Ladder" collapsible actions={<ChartActions onExport={() => exportChart("ladder")} onShare={() => shareChart("ladder")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <TargetLadder probs={targetLadderData} />
+                  </Suspense>
+                </Card>
+              </motion.div>
+            </div>
+          ),
+        },
+        {
+          id: "scenarios",
+          label: "Scenarios",
+          content: (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Scenario Tiles */}
+              <motion.div className="md:col-span-2" initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3 }}>
+                <Card title="Scenario Tiles" collapsible actions={<ChartActions onExport={() => exportChart("scenarios")} onShare={() => shareChart("scenarios")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <ScenarioTiles
+                      artifact={{
+                        symbol: art.symbol,
+                        horizon_days: art.horizon_days,
+                        median_path: art.median_path,
+                        bands: { p05: art.bands.p95_low, p50: art.bands.p50, p95: art.bands.p95_high },
+                        prob_up_end: art.prob_up_end,
+                        drivers: (art.drivers ?? []).map(d => ({ name: d.feature, weight: d.weight })),
+                      }}
+                      reps={scenarioReps}
+                    />
+                  </Suspense>
+                </Card>
+              </motion.div>
+
+              {/* Top Drivers */}
+              <motion.div initial={{ y: 20 }} animate={{ y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
+                <Card title="Top Drivers" collapsible actions={<ChartActions onExport={() => exportChart("drivers")} onShare={() => shareChart("drivers")} />}>
+                  <Suspense fallback={<ChartFallback />}>
+                    <DriversWaterfall drivers={drivers.map(d => ({ name: d.feature, weight: d.weight }))} />
+                  </Suspense>
+                </Card>
+              </motion.div>
+            </div>
+          ),
+        },
+      ]
+    : [];
+
+  // --- Render ---
+  return (
+    <ErrorBoundary>
+      <div className={`min-h-screen ${theme === "dark" ? "bg-black text-white" : "bg-gray-100 text-gray-900"}`}>
+        <Toaster />
+        <main className="mx-auto max-w-[1280px] p-4">
+          {/* top bar */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <PandaIcon />
+              <h1 className="text-xl font-bold">PredictiveTwin</h1>
+            </div>
+            <button
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="p-2 rounded bg-[#131A23] border border-[#1B2431]"
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+            >
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+          </div>
+
+          {/* onboarding */}
+          {showOnboarding && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6 p-4 rounded bg-[#131A23] border border-[#1B2431]">
+              <h2 className="text-lg font-semibold">Welcome to PredictiveTwin!</h2>
+              <p className="text-sm">Run simulations, analyze risks, and explore scenarios.</p>
+              <button
+                onClick={() => { localStorage.setItem("onboardingSeen", "true"); setShowOnboarding(false); }}
+                className="mt-2 px-3 py-1 rounded bg-[#34D399] text-black text-sm"
+                aria-label="Dismiss onboarding"
+              >
+                Got it
+              </button>
+            </motion.div>
+          )}
+
+          {/* layout: main column + sticky right rail */}
+          <div className="flex gap-4 items-start">
+            {/* LEFT: main column */}
+            <section className="flex-1 min-w-0">
+              <SimulationControls
+                symbol={symbol}
+                setSymbol={setSymbol}
+                horizon={horizon}
+                setHorizon={setHorizon}
+                paths={paths}
+                setPaths={setPaths}
+                includeOptions={includeOptions}
+                setIncludeOptions={setIncludeOptions}
+                includeFutures={includeFutures}
+                setIncludeFutures={setIncludeFutures}
+                includeNews={includeNews}
+                setIncludeNews={setIncludeNews}
+                xHandles={xHandles}
+                setXHandles={setXHandles}
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+                showApiKey={showApiKey}
+                setShowApiKey={setShowApiKey}
+                isTraining={isTraining}
+                isPredicting={isPredicting}
+                isSimulating={isSimulating}
+                onPreset={handlePreset}
+                onRunSimulation={runSimulation}
+                onTrainModel={trainModel}
+                onRunPredict={runPredict}
+                onLabelNow={() => labelNow(apiKey)}
+                onLearnNow={() => learnNow(apiKey, symbol)}
+              />
+
+              {/* Sticky row: Simulation Log (left) + Quick & Recent (right) */}
+              <section className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Simulation Log (sticky) */}
+                <div className="md:col-span-2 md:sticky md:top-4 self-start">
+                  <Card title="Simulation Log" collapsible>
+                    <div ref={logRef} className="h-40 overflow-auto text-xs text-gray-400 bg-[#131A23] p-2 rounded" aria-label="Simulation log">
+                      {logMessages.map((m, i) => (<div key={i}>{m}</div>))}
+                    </div>
+                    <button
+                      onClick={exportArtifact}
+                      className="mt-2 px-3 py-1 rounded bg-[#131A23] border border-[#1B2431] text-sm"
+                      disabled={!art}
+                      aria-label="Export simulation artifact"
+                    >
+                      Export Artifact
+                    </button>
+                  </Card>
+                </div>
+
+                {/* Quick & Recent (sticky, same height as log) */}
+                <div className="md:sticky md:top-4 self-start">
+                  <Card title="Quick & Recent" collapsible>
+                    {/* Quick presets */}
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <button onClick={() => { setSymbol("NVDA"); setHorizon(30); }} className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition">NVDA · 30d</button>
+                      <button onClick={() => { setSymbol("TSLA"); setHorizon(60); }} className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition">TSLA · 60d</button>
+                      <button onClick={() => { setSymbol("BTC-USD"); setHorizon(180); }} className="px-3 py-1.5 rounded bg-[#34D399] text-black text-sm hover:bg-[#2BB77F] transition">BTC · 180d</button>
+                    </div>
+
+                    {/* Recents list (auto-reads from localStorage "pp_runs") */}
+                    <div className="h-40 overflow-auto divide-y divide-[#1B2431] rounded bg-[#131A23]">
+                      {(() => {
+                        let recent: any[] = [];
+                        try { recent = JSON.parse(localStorage.getItem("pp_runs") || "[]"); } catch {}
+                        if (!recent || recent.length === 0) return <div className="text-xs text-gray-400 p-2">No recent runs yet.</div>;
+                        return recent.map((r, idx) => (
+                          <button
+                            key={r.id || r.finishedAt || idx}
+                            className="w-full text-left px-3 py-2 hover:bg-[#0E141C] text-sm"
+                            onClick={() => { if (r.symbol) setSymbol(r.symbol); if (r.horizon) setHorizon(r.horizon); if (r.n_paths) setPaths(r.n_paths); }}
+                            title="Click to load these settings"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">{r.symbol}</span>
+                              <span className="text-gray-400">{r.finishedAt ? new Date(r.finishedAt).toLocaleString() : ""}</span>
+                            </div>
+                            <div className="text-gray-300">
+                              {r.horizon ? `${r.horizon}d` : ""} {r.n_paths ? `• ${r.n_paths.toLocaleString()} paths` : ""}
+                              {typeof r.probUp === "number" && <span className="ml-2 text-gray-400">· ProbUp {Math.round(r.probUp * 100)}%</span>}
+                            </div>
+                          </button>
+                        ));
+                      })()}
+                    </div>
+                  </Card>
+                </div>
+              </section>
+
+              {/* Key metrics */}
+              {art && <SummaryCard symbol={art.symbol} probUp={probUp} var95={var95} es95={es95} />}
+
+              {/* Tabs + charts */}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+                <AccessibleTabs tabs={tabs} activeId={activeTab} onChange={(id) => setActiveTab(id as "risk" | "scenarios")} />
+              </motion.div>
+
+              {/* News (optional) — only once */}
+              {includeNews && (
+                <Card title="News" collapsible>
+                  <NewsList symbol={symbol} items={newsItems} loading={newsLoading} error={newsError} nextCursor={nextCursor} onLoadMore={loadMore} />
+                </Card>
+              )}
+            </section>
+
+            {/* RIGHT: sticky sidebar for quick sims only */}
+            <aside className="hidden lg:block w-80 shrink-0 sticky top-4 max-h-[calc(100vh-5rem)] overflow-y-auto">
+              <QuickSimsPanel
+                presets={QUICK_PRESETS}
+                history={runHistory.map((r) => ({ symbol: r.symbol, horizon: r.horizon, paths: r.n_paths }))}
+                onSelect={({ symbol, horizon, paths }) => { setSymbol(symbol); setHorizon(horizon); setPaths(paths); }}
+              />
+            </aside>
+          </div>
+        </main>
+      </div>
+    </ErrorBoundary>
+  );
 }

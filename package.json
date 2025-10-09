@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview --strictPort --port 5174",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty",
+    "engines": { "node": ">=18" }
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
@@ -17,7 +18,8 @@
     "react": "18.3.1",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "18.3.1",
-    "react-hot-toast": "^2.4.1"
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^7.9.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.14",
