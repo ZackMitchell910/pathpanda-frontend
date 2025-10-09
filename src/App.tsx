@@ -20,6 +20,7 @@ import RightRail from "./components/RightRail";
 import { TrackRecordPanel } from "./components/TrackRecordPanel";
 import { PP_COLORS } from "./theme/chartTheme";
 
+
 // Lazy chunked charts/add-ons
 const FanChart = React.lazy(() => import("./components/FanChart"));
 const HitProbabilityRibbon = React.lazy(() =>
@@ -39,6 +40,8 @@ const TargetLadder = React.lazy(() =>
 );
 
 const ChartFallback: React.FC = () => <div className="text-xs text-gray-400">Loading chart…</div>;
+const isNum = (x: any): x is number => typeof x === "number" && Number.isFinite(x);
+
 
 interface MCArtifact {
   symbol: string;
@@ -156,7 +159,17 @@ export default function App() {
     } catch {
       return [];
     }
+
   });
+  const safeRunHistory = useMemo(
+    () =>
+      (runHistory || []).map((r) => ({
+        ...r,
+        q50: isNum(r.q50) ? r.q50 : undefined,
+        probUp: isNum(r.probUp) ? r.probUp : undefined,
+      })),
+    [runHistory]
+  );
 
   const logRef = useRef<HTMLDivElement | null>(null);
 
@@ -787,15 +800,18 @@ export default function App() {
         </Card>
 
         <Card title="Run Summary">
-          <SummaryCard
-            probUpLabel={fmtPct(probMeta.v)}
-            probUpColor={probMeta.color}
-            progress={progress}
-            currentPrice={currentPrice ?? undefined}
-            eod={eod || undefined}
-          />
+          {art ? (
+            <SummaryCard
+              probUpLabel={fmtPct(probMeta.v)}
+              probUpColor={probMeta.color}
+              progress={progress}
+              currentPrice={isNum(currentPrice) ? currentPrice : undefined}
+              eod={eod || undefined}
+            />
+          ) : (
+            <div className="text-xs opacity-70">Run a simulation to view summary.</div>
+          )}
         </Card>
-
         <Card title="Activity Log">
           <div ref={logRef} className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs`}>
             {logMessages.map((m, i) => (
@@ -813,7 +829,7 @@ export default function App() {
         </Card>
 
         <Card title="Track Record">
-          <TrackRecordPanel runs={runHistory} />
+          <TrackRecordPanel runs={safeRunHistory} />
         </Card>
 
         <Card title="News">
