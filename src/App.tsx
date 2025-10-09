@@ -18,8 +18,6 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ChallengePanel } from "./components/ChallengePanel";
 import RightRail from "./components/RightRail";
 import { TrackRecordPanel } from "./components/TrackRecordPanel";
-import { PP_COLORS } from "./theme/chartTheme";
-
 
 // Lazy chunked charts/add-ons
 const FanChart = React.lazy(() => import("./components/FanChart"));
@@ -41,8 +39,9 @@ const TargetLadder = React.lazy(() =>
 
 const ChartFallback: React.FC = () => <div className="text-xs text-gray-400">Loading chart…</div>;
 const isNum = (x: any): x is number => typeof x === "number" && Number.isFinite(x);
+const f2 = (n: any) => Number(n).toFixed(2); // safe toFixed helper
 
-
+// ---- Types ----
 interface MCArtifact {
   symbol: string;
   horizon_days: number;
@@ -78,7 +77,7 @@ interface RunSummary {
   probUp?: number | null;
 }
 
-// ---- API base + helpers (keep hard fallback so calls never hit Netlify) ----
+// ---- API base + helpers (hard fallback so calls never hit Netlify) ----
 const RAW_API_BASE =
   (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
   (import.meta as any)?.env?.VITE_PREDICTIVE_API || // Vite (Netlify)
@@ -149,7 +148,7 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(
     typeof window !== "undefined" ? !localStorage.getItem("onboardingSeen") : false
   );
-  const [activeTab, setActiveTab] = useState<"risk" | "scenarios" | "track">("risk");
+  const [activeTab] = useState<"risk" | "scenarios" | "track">("risk");
 
   const [runHistory, setRunHistory] = useState<RunSummary[]>(() => {
     if (typeof window === "undefined") return [];
@@ -159,8 +158,8 @@ export default function App() {
     } catch {
       return [];
     }
-
   });
+
   const safeRunHistory = useMemo(
     () =>
       (runHistory || []).map((r) => ({
@@ -192,7 +191,7 @@ export default function App() {
   );
   const throttledProgress = useMemo(() => throttle((p: number) => setProgress(p), 100), []);
 
-  const { items: newsItems, nextCursor, loading: newsLoading, error: newsError, loadMore } = useNews({
+  const { items: newsItemsRaw, nextCursor, loading: newsLoading, error: newsError, loadMore } = useNews({
     symbol,
     includeNews,
     apiKey,
@@ -201,6 +200,7 @@ export default function App() {
     onLog: throttledLog,
     retry: 0,
   });
+  const newsItems = Array.isArray(newsItemsRaw) ? newsItemsRaw : [];
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -316,31 +316,31 @@ export default function App() {
               ["Day", "Median", "P80 Low", "P80 High", "P95 Low", "P95 High"],
               ...art.median_path.map(([t], i) => [
                 `D${t}`,
-                art.median_path[i][1].toFixed(2),
-                art.bands.p80_low[i][1].toFixed(2),
-                art.bands.p80_high[i][1].toFixed(2),
-                art.bands.p95_low[i][1].toFixed(2),
-                art.bands.p95_high[i][1].toFixed(2),
+                f2(art.median_path[i]?.[1]),
+                f2(art.bands?.p80_low?.[i]?.[1]),
+                f2(art.bands?.p80_high?.[i]?.[1]),
+                f2(art.bands?.p95_low?.[i]?.[1]),
+                f2(art.bands?.p95_high?.[i]?.[1]),
               ]),
             ];
             break;
           case "hit":
             csvData = [
-              ["Day", ...(art.hit_probs?.thresholds_abs.map((t) => `Above ${t.toFixed(2)}`) || [])],
+              ["Day", ...(art.hit_probs?.thresholds_abs?.map((t) => `Above ${f2(t)}`) || [])],
               ...art.median_path.map(([t], i) => [
                 `D${t}`,
-                ...(art.hit_probs?.probs_by_day.map((probs) => probs[i]?.toFixed(2) || "0") || []),
+                ...(art.hit_probs?.probs_by_day?.map((probs) => f2(probs?.[i])) || []),
               ]),
             ];
             break;
           case "terminal":
-            csvData = [["Price", "Frequency"], ...(art.terminal_prices?.map((p) => [p.toFixed(2), "1"]) || [])];
+            csvData = [["Price", "Frequency"], ...((art.terminal_prices || []).map((p) => [f2(p), "1"]) || [])];
             break;
           case "drivers":
-            csvData = [["Driver", "Weight"], ...drivers.map((d) => [d.feature, d.weight.toFixed(2)])];
+            csvData = [["Driver", "Weight"], ...drivers.map((d) => [d.feature, f2(d.weight)])];
             break;
           case "ladder":
-            csvData = [["Target", "Probability"], ...buildLadderItems(art).map((d) => [d.label, (d.p * 100).toFixed(2)])];
+            csvData = [["Target", "Probability"], ...buildLadderItems(art).map((d) => [d.label, f2(d.p * 100)])];
             break;
         }
         if (csvData.length) {
@@ -554,7 +554,7 @@ export default function App() {
             horizon: horizonNum ?? 0,
             n_paths: paths,
             finishedAt: new Date().toISOString(),
-            q50: artf.bands.p50?.[artf.bands.p50.length - 1]?.[1] ?? null,
+            q50: artf.bands?.p50?.[artf.bands.p50.length - 1]?.[1] ?? null,
             probUp: artf.prob_up_end ?? null,
           },
           ...prev,
@@ -570,36 +570,6 @@ export default function App() {
       setIsSimulating(false);
     }
   }
-
-  // —— Chart data (for inline examples, if needed) ——
-  const chartData = useMemo(() => {
-    if (!art) return null;
-    return {
-      labels: art.median_path.map(([t]) => `D${t}`),
-      datasets: [
-        {
-          label: "Median",
-          data: art.median_path.map(([, y]) => y),
-          borderColor: PP_COLORS.median,
-          borderWidth: 2,
-          pointRadius: 0,
-        },
-        {
-          label: "80% Range",
-          data: art.bands.p80_high.map(([, y]) => y),
-          borderWidth: 0,
-          fill: "+1",
-          backgroundColor: PP_COLORS.p80,
-        },
-        {
-          label: "_p80_low_hidden",
-          data: art.bands.p80_low.map(([, y]) => y),
-          borderWidth: 0,
-          fill: false,
-        },
-      ],
-    };
-  }, [art]);
 
   // —— Render ——
   return (
@@ -732,11 +702,7 @@ export default function App() {
           <div data-chart="fan">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art ? (
-                  <FanChart artifact={art} />
-                ) : (
-                  <div className="text-xs opacity-70">Run a simulation to view.</div>
-                )}
+                {art ? <FanChart artifact={art} /> : <div className="text-xs opacity-70">Run a simulation to view.</div>}
               </Suspense>
             </ErrorBoundary>
             {art && (
@@ -751,8 +717,13 @@ export default function App() {
           <div data-chart="hit">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art?.hit_probs ? (
-                  <HitProbabilityRibbon hit={art.hit_probs} />
+                {art?.hit_probs && Array.isArray(art.hit_probs.thresholds_abs) && Array.isArray(art.hit_probs.probs_by_day) ? (
+                  <HitProbabilityRibbon
+                    hit={{
+                      thresholds_abs: art.hit_probs.thresholds_abs ?? [],
+                      probs_by_day: art.hit_probs.probs_by_day ?? [],
+                    }}
+                  />
                 ) : (
                   <div className="text-xs opacity-70">Run a simulation with hit probabilities.</div>
                 )}
@@ -767,7 +738,9 @@ export default function App() {
               <Suspense fallback={<ChartFallback />}>
                 {Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? (
                   <TerminalDistribution
-                    prices={art!.terminal_prices.filter((v) => typeof v === "number" && Number.isFinite(v))}
+                    prices={(art!.terminal_prices || []).filter(
+                      (v): v is number => typeof v === "number" && Number.isFinite(v)
+                    )}
                   />
                 ) : (
                   <div className="text-xs opacity-70">No terminal distribution yet.</div>
@@ -800,10 +773,10 @@ export default function App() {
           <div data-chart="ladder">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art?.hit_probs ? (
+                {art?.hit_probs && Array.isArray(art.hit_probs.thresholds_abs) && Array.isArray(art.hit_probs.probs_by_day) ? (
                   <TargetLadder
-                    items={(art.hit_probs.thresholds_abs || []).map((thr, i) => {
-                      const lastT = art.median_path.length - 1;
+                    items={art.hit_probs.thresholds_abs.map((thr, i) => {
+                      const lastT = Math.max(0, art.median_path.length - 1);
                       const raw = art.hit_probs!.probs_by_day?.[i]?.[lastT];
                       const p = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
                       const S0 = art.median_path?.[0]?.[1] ?? 0;
@@ -899,11 +872,10 @@ export default function App() {
   );
 }
 
-
 // —— Utilities ——
 function buildLadderItems(art: MCArtifact) {
   if (!art?.hit_probs?.thresholds_abs?.length) return [];
-  const lastT = art.median_path.length - 1;
+  const lastT = Math.max(0, art.median_path.length - 1);
   const S0 = art.median_path?.[0]?.[1] ?? 0;
   return art.hit_probs.thresholds_abs.map((thr, i) => {
     const p = art.hit_probs!.probs_by_day?.[i]?.[lastT] ?? 0;
