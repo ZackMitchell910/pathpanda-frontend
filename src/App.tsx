@@ -732,7 +732,11 @@ export default function App() {
           <div data-chart="fan">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art ? <FanChart artifact={art} /> : <div className="text-xs opacity-70">Run a simulation to view.</div>}
+                {art ? (
+                  <FanChart artifact={art} />
+                ) : (
+                  <div className="text-xs opacity-70">Run a simulation to view.</div>
+                )}
               </Suspense>
             </ErrorBoundary>
             {art && (
@@ -745,73 +749,92 @@ export default function App() {
 
         <Card title="Hit Probabilities" actions={<ChartActions onExport={() => exportChart("hit")} />}>
           <div data-chart="hit">
-            <Suspense fallback={<ChartFallback />}>
-              {art?.hit_probs ? (
-                <HitProbabilityRibbon hit={art.hit_probs} />
-              ) : (
-                <div className="text-xs opacity-70">Run a simulation with hit probabilities.</div>
-              )}
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ChartFallback />}>
+                {art?.hit_probs ? (
+                  <HitProbabilityRibbon hit={art.hit_probs} />
+                ) : (
+                  <div className="text-xs opacity-70">Run a simulation with hit probabilities.</div>
+                )}
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </Card>
 
         <Card title="Terminal Distribution" actions={<ChartActions onExport={() => exportChart("terminal")} />}>
           <div data-chart="terminal">
-            <Suspense fallback={<ChartFallback />}>
-              {art?.terminal_prices?.length ? (
-                <TerminalDistribution prices={art.terminal_prices} />
-              ) : (
-                <div className="text-xs opacity-70">No terminal distribution yet.</div>
-              )}
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ChartFallback />}>
+                {Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? (
+                  <TerminalDistribution
+                    prices={art!.terminal_prices.filter((v) => typeof v === "number" && Number.isFinite(v))}
+                  />
+                ) : (
+                  <div className="text-xs opacity-70">No terminal distribution yet.</div>
+                )}
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </Card>
 
         <Card title="Drivers (Explainability)" actions={<ChartActions onExport={() => exportChart("drivers")} />}>
           <div data-chart="drivers">
-            <Suspense fallback={<ChartFallback />}>
-              {drivers?.length ? (
-                <DriversWaterfall drivers={drivers} />
-              ) : (
-                <div className="text-xs opacity-70">No drivers yet.</div>
-              )}
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ChartFallback />}>
+                {drivers?.length ? (
+                  <DriversWaterfall
+                    drivers={drivers.map((d) => ({
+                      feature: d.feature,
+                      weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0,
+                    }))}
+                  />
+                ) : (
+                  <div className="text-xs opacity-70">No drivers yet.</div>
+                )}
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </Card>
 
         <Card title="Target Ladder" actions={<ChartActions onExport={() => exportChart("ladder")} />}>
           <div data-chart="ladder">
-            <Suspense fallback={<ChartFallback />}>
-              {art?.hit_probs ? (
-                <TargetLadder
-                  items={(art.hit_probs.thresholds_abs || []).map((thr, i) => {
-                    const lastT = art.median_path.length - 1;
-                    const p = art.hit_probs!.probs_by_day?.[i]?.[lastT] ?? 0;
-                    const S0 = art.median_path?.[0]?.[1] ?? 0;
-                    const pct = S0 ? Math.round((thr / S0 - 1) * 100) : 0;
-                    return { label: `${pct >= 0 ? "+" : ""}${pct}%`, p };
-                  })}
-                />
-              ) : (
-                <div className="text-xs opacity-70">Run a simulation to populate the ladder.</div>
-              )}
-            </Suspense>
+            <ErrorBoundary>
+              <Suspense fallback={<ChartFallback />}>
+                {art?.hit_probs ? (
+                  <TargetLadder
+                    items={(art.hit_probs.thresholds_abs || []).map((thr, i) => {
+                      const lastT = art.median_path.length - 1;
+                      const raw = art.hit_probs!.probs_by_day?.[i]?.[lastT];
+                      const p = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+                      const S0 = art.median_path?.[0]?.[1] ?? 0;
+                      const pct = S0 ? Math.round((thr / S0 - 1) * 100) : 0;
+                      return { label: `${pct >= 0 ? "+" : ""}${pct}%`, p };
+                    })}
+                  />
+                ) : (
+                  <div className="text-xs opacity-70">Run a simulation to populate the ladder.</div>
+                )}
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </Card>
 
         <Card title="Run Summary">
-          {art ? (
-            <SummaryCard
-              probUpLabel={fmtPct(probMeta.v)}
-              probUpColor={probMeta.color}
-              progress={progress}
-              currentPrice={isNum(currentPrice) ? currentPrice : undefined}
-              eod={eod || undefined}
-            />
-          ) : (
-            <div className="text-xs opacity-70">Run a simulation to view summary.</div>
-          )}
+          <ErrorBoundary>
+            {art ? (
+              <SummaryCard
+                probUpLabel={fmtPct(probMeta.v)}
+                probUpColor={probMeta.color}
+                progress={progress}
+                currentPrice={typeof currentPrice === "number" && Number.isFinite(currentPrice) ? currentPrice : undefined}
+                eod={eod || undefined}
+              />
+            ) : (
+              <div className="text-xs opacity-70">Run a simulation to view summary.</div>
+            )}
+          </ErrorBoundary>
         </Card>
+
         <Card title="Activity Log">
           <div ref={logRef} className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs`}>
             {logMessages.map((m, i) => (
@@ -823,25 +846,39 @@ export default function App() {
         </Card>
 
         <Card title="Scenarios" className="md:col-span-2">
-          <Suspense fallback={<ChartFallback />}>
-            {art ? <ScenarioTiles artifact={art} /> : <div className="text-xs opacity-70">—</div>}
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={<ChartFallback />}>
+              {art ? <ScenarioTiles artifact={art} /> : <div className="text-xs opacity-70">—</div>}
+            </Suspense>
+          </ErrorBoundary>
         </Card>
 
         <Card title="Track Record">
-          <TrackRecordPanel runs={safeRunHistory} />
+          <ErrorBoundary>
+            <TrackRecordPanel runs={safeRunHistory} />
+          </ErrorBoundary>
         </Card>
 
         <Card title="News">
-          {includeNews ? (
-            <NewsList items={newsItems} loading={newsLoading} error={newsError} onLoadMore={loadMore} nextCursor={nextCursor} />
-          ) : (
-            <div className="text-xs opacity-70">Enable “Include news” to fetch recent headlines.</div>
-          )}
+          <ErrorBoundary>
+            {includeNews ? (
+              <NewsList
+                items={newsItems}
+                loading={newsLoading}
+                error={newsError}
+                onLoadMore={loadMore}
+                nextCursor={nextCursor}
+              />
+            ) : (
+              <div className="text-xs opacity-70">Enable “Include news” to fetch recent headlines.</div>
+            )}
+          </ErrorBoundary>
         </Card>
 
         <Card title="Challenges">
-          <ChallengePanel />
+          <ErrorBoundary>
+            <ChallengePanel />
+          </ErrorBoundary>
         </Card>
       </div>
 
@@ -861,6 +898,7 @@ export default function App() {
     </main>
   );
 }
+
 
 // —— Utilities ——
 function buildLadderItems(art: MCArtifact) {
