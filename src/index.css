@@ -53,3 +53,12 @@ button {
   min-width: 48px;
   min-height: 48px;
 }
+:root {
+  /* Point this at whatever you use for SIMETRIX text. Swap 'Sora' if needed. */
+  --brand-font: "Sora", "Inter Tight", ui-sans-serif, system-ui, -apple-system,
+                "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+@layer utilities {
+  .font-brand { font-family: var(--brand-font); }
+}
