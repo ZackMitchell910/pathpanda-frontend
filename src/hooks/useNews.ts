@@ -1,160 +1,119 @@
 // src/hooks/useNews.ts
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-// hooks/useNews.ts (inside your fetcher)
-const API_BASE =
-  (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  "";
-
-const api = (p: string) => (API_BASE ? `${API_BASE}${p}` : p);
-
-// then use: fetch(api(`/api/news/${symbol}?limit=${limit}&days=${days}`), { headers: … })
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type NewsItem = {
-  id?: string;
-  url: string;
+  id: string;
   title: string;
-  source?: string;
+  url: string;
   published_at?: string;
-  sentiment?: number;
-  image_url?: string;
+  source?: string;
+  summary?: string;
 };
 
-type UseNewsOpts = {
+type UseNewsArgs = {
   symbol: string;
   includeNews: boolean;
-  apiKey: string;
   limit?: number;
   days?: number;
+  retry?: number;
+  apiBase: string;
+  getHeaders: () => Record<string, string>;
   onLog?: (m: string) => void;
-  retry?: number; // retries on non-200
 };
 
-type HookState = {
+type UseNewsReturn = {
   items: NewsItem[];
   nextCursor: string | null;
   loading: boolean;
   error: string | null;
+  loadMore: () => Promise<void>;
 };
 
-export function useNews({
-  symbol,
-  includeNews,
-  apiKey,
-  limit = 6,
-  days = 7,
-  onLog,
-  retry = 0,
-}: UseNewsOpts) {
-  const [state, setState] = useState<HookState>({
-    items: [],
-    nextCursor: null,
-    loading: false,
-    error: null,
-  });
+export default function useNews(args: UseNewsArgs): UseNewsReturn {
+  const { symbol, includeNews, limit = 8, days = 7, retry = 0, apiBase, getHeaders, onLog } = args;
 
-  const cursorRef = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const [items, setItems] = useState<NewsItem[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const tried = useRef(0);
 
-  const canFetch = useMemo(
-    () => includeNews && !!symbol && !!apiKey,
-    [includeNews, symbol, apiKey]
-  );
+  // Single fetch function that takes a cursor arg so its identity
+  // does NOT depend on "cursor" (prevents effect loops).
+  const fetchNews = useCallback(
+    async (cursorArg: string | null) => {
+      if (!includeNews) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const base = apiBase.replace(/\/+$/, "");
+        const s = (symbol || "NVDA").toUpperCase();
+        const headers = getHeaders();
+        const key = headers["X-API-Key"] || (headers as any)["x-api-key"] || "";
 
-  const reset = useCallback(() => {
-    cursorRef.current = null;
-    setState({ items: [], nextCursor: null, loading: false, error: null });
-  }, []);
+        const params = new URLSearchParams({
+          limit: String(limit),
+          days: String(days),
+        });
+        if (cursorArg) params.set("cursor", cursorArg);
+        if (key) params.set("api_key", key);
 
-  const fetchPage = useCallback(
-    async (append: boolean) => {
-      if (!canFetch || state.loading) return;
-      abortRef.current?.abort();
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
+        const url = `${base}/api/news/${encodeURIComponent(s)}?${params.toString()}`;
+        const r = await fetch(url, { headers });
+        const text = await r.text();
 
-      setState((s) => ({ ...s, loading: true, error: null }));
-      const qs = new URLSearchParams();
-      qs.set("limit", String(limit));
-      qs.set("days", String(days));
-      if (cursorRef.current) qs.set("cursor", cursorRef.current);
-
-      const url = `/api/news/${encodeURIComponent(symbol)}?${qs.toString()}`;
-      let attempts = 0;
-      while (true) {
-        try {
-          const res = await fetch(url, {
-            headers: { "X-API-Key": apiKey },
-            signal: ctrl.signal,
-          });
-          if (!res.ok) {
-            const txt = await res.text();
-            throw new Error(`HTTP ${res.status} — ${txt || res.statusText}`);
+        if (!r.ok) {
+          if (/^\s*<!doctype html>|<html/i.test(text)) {
+            throw new Error("Misrouted to HTML; check API base.");
           }
-          const data = await res.json() as {
-            items?: NewsItem[];
-            next_cursor?: string | null;
-          };
-
-          const newItems = data.items ?? [];
-          const next = data.next_cursor ?? null; // snake_case → camelCase mapping
-
-          setState((s) => ({
-            items: append ? s.items.concat(newItems) : newItems,
-            nextCursor: next,
-            loading: false,
-            error: null,
-          }));
-          cursorRef.current = next;
-          onLog?.(
-            `News: fetched ${newItems.length} item(s)${
-              next ? ` (next_cursor=${next})` : " (end)"
-            }`
-          );
-          return;
-        } catch (e: any) {
-          attempts++;
-          if (attempts > retry || ctrl.signal.aborted) {
-            setState((s) => ({
-              ...s,
-              loading: false,
-              error: e?.message || String(e),
-            }));
-            onLog?.(`News error: ${e?.message || e}`);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 400 * attempts));
+          const msg = `HTTP ${r.status} – ${text}`;
+          setError(msg);
+          onLog?.(`News error: ${msg}`);
+          return; // do not retry on server error here
         }
+
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
+        }
+
+        const list = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+        setItems((prev) => (cursorArg ? [...prev, ...list] : list));
+        setCursor(data?.nextCursor ?? null);
+        onLog?.(`News: ${list.length} items${cursorArg ? " (more)" : ""}`);
+      } catch (e: any) {
+        const msg = e?.message || String(e);
+        setError(msg);
+        onLog?.(`News error: ${msg}`);
+        // avoid infinite retry loops, especially on 401
+        if (tried.current < (retry || 0) && !/HTTP 401/.test(msg)) {
+          tried.current += 1;
+          setTimeout(() => fetchNews(cursorArg), 800);
+        }
+      } finally {
+        setLoading(false);
       }
     },
-    [apiKey, canFetch, days, limit, onLog, retry, state.loading, symbol]
+    [apiBase, symbol, limit, days, includeNews, getHeaders, onLog, retry]
   );
 
-  // initial & dependency changes
+  // Reset & fetch on relevant inputs; DO NOT depend on "cursor" or "fetchNews" identity.
   useEffect(() => {
-    if (!includeNews) {
-      reset();
-      return;
+    setItems([]);
+    setCursor(null);
+    tried.current = 0;
+    if (includeNews) {
+      void fetchNews(null);
     }
-    if (canFetch) fetchPage(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeNews, symbol, apiKey, limit, days]);
+  }, [symbol, includeNews, limit, days]);
 
-  // cleanup on unmount
-  useEffect(() => {
-    return () => abortRef.current?.abort();
-  }, []);
+  const loadMore = useCallback(async () => {
+    if (!includeNews || !cursor || loading) return;
+    await fetchNews(cursor);
+  }, [includeNews, cursor, loading, fetchNews]);
 
-  const loadMore = useCallback(() => {
-    if (state.nextCursor) fetchPage(true);
-  }, [fetchPage, state.nextCursor]);
-
-  return {
-    items: state.items,
-    nextCursor: state.nextCursor,
-    loading: state.loading,
-    error: state.error,
-    loadMore,
-  };
+  return { items, nextCursor: cursor, loading, error, loadMore };
 }
