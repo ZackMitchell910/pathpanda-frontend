@@ -8,24 +8,39 @@
     "build": "vite build",
     "preview": "vite preview --strictPort --port 5174",
     "typecheck": "tsc -b --pretty",
-    "engines": { "node": ">=18" }
+    "engines": {
+      "node": ">=18"
+    }
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
+    "@react-three/postprocessing": "^2.19.1",
+    "@visx/curve": "^3.12.0",
+    "@visx/gradient": "^3.12.0",
+    "@visx/responsive": "^3.12.0",
+    "@visx/scale": "^3.12.0",
+    "@visx/shape": "^3.12.0",
     "chart.js": "^4.5.0",
+    "d3-shape": "^3.2.0",
     "framer-motion": "^11.18.2",
     "html2canvas": "^1.4.1",
+    "lucide-react": "^0.545.0",
     "react": "18.3.1",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "18.3.1",
-    "react-hot-toast": "^2.4.1",
-    "react-router-dom": "^7.9.4"
+    "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.9.4",
+    "three": "^0.180.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.14",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
     "typescript": "^5.5.4",

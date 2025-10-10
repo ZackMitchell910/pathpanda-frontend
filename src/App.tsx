@@ -10,7 +10,7 @@ import { encodeState } from "./utils/stateShare";
 
 import { Card } from "./components/ui/Card";
 import { NewsList } from "./components/NewsList";
-import useNews from "@/hooks/useNews";
+import { useNews } from "@/hooks/useNews";
 import { InlineLegend } from "./components/InlineLegend";
 import { ChartActions } from "./components/ChartActions";
 import { SummaryCard } from "./components/SummaryCard";
@@ -94,7 +94,7 @@ const RAW_API_BASE =
   (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
   (import.meta as any)?.env?.VITE_API_BASE ||
   (typeof process !== "undefined" && (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL) ||
-  "https://pathpanda-api.onrender.com";
+  "https://api.simetrix.io";
 
 const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
@@ -170,26 +170,6 @@ export default function App() {
       return [];
     }
   });
-
-  const safeRunHistory = useMemo(
-    () =>
-      (runHistory || []).map((r) => ({
-        ...r,
-        q50: isNum(r.q50) ? r.q50 : undefined,
-        probUp: isNum(r.probUp) ? r.probUp : undefined,
-      })),
-    [runHistory]
-  );
-
-  const logRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    console.info("[PathPanda] API_BASE =", API_BASE || "(empty; using relative URLs)");
-  }, []);
-
-  // —— Derived ——
-  const horizonNum = typeof horizon === "number" ? horizon : null;
-
   const throttledLog = useMemo(
     () =>
       throttle((m: string) => {
@@ -200,7 +180,41 @@ export default function App() {
       }, 120),
     []
   );
+
   const throttledProgress = useMemo(() => throttle((p: number) => setProgress(p), 100), []);
+
+  const runsForTrackRecord = useMemo(
+    () =>
+      (Array.isArray(runHistory) ? runHistory : []).map((r: any) => ({
+        ...r,
+        q50: (typeof r?.q50 === "number" && Number.isFinite(r.q50)) ? r.q50 : undefined,
+        probUp: (typeof r?.probUp === "number" && Number.isFinite(r.probUp)) ? r.probUp : undefined,
+      })),
+    [runHistory]
+  );
+
+  const recentItems = useMemo(() => {
+    const list = runsForTrackRecord;
+    return list.slice(-8).reverse().map((r) => ({
+      title: `${r.symbol} • H${r.horizon}d`,
+      subtitle: `${r.n_paths?.toLocaleString?.() ?? r.n_paths} paths — ${new Date(r.finishedAt).toLocaleString()}`,
+      onClick: () => {
+        setSymbol(r.symbol);
+        setHorizon(r.horizon);
+        setPaths(r.n_paths);
+        throttledLog?.(`Loaded recent: ${r.symbol} • ${r.horizon}d • ${r.n_paths} paths`);
+      },
+    }));
+  }, [runsForTrackRecord, throttledLog]);
+
+  const logRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    console.info("[PathPanda] API_BASE =", API_BASE || "(empty; using relative URLs)");
+  }, []);
+
+  // —— Derived ——
+  const horizonNum = typeof horizon === "number" ? horizon : null;
 
   // Persist theme + apiKey
   useEffect(() => {
@@ -298,12 +312,6 @@ export default function App() {
       minimumFractionDigits: 1,
       maximumFractionDigits: 1,
     });
-
-  const handlePreset = (preset: { symbol: string; horizon: number; paths: number }) => {
-    setSymbol(preset.symbol);
-    setHorizon(preset.horizon);
-    setPaths(preset.paths);
-  };
 
   const eod = art?.eod_estimate ?? null;
 
@@ -635,14 +643,23 @@ export default function App() {
   })();
 
   // —— Derived: recent runs for the right rail ——
-  const recentRuns = (Array.isArray(safeRunHistory) ? safeRunHistory : [])
+  // Build "Recent runs" list from the canonical, normalized history
+  const recentRuns = (Array.isArray(runsForTrackRecord) ? runsForTrackRecord : [])
     .slice(-8)
     .reverse()
-    .map(r => ({
+    .map((r) => ({
       title: `${r.symbol} • H${r.horizon}d`,
-      subtitle: `${r.n_paths.toLocaleString()} paths — ${new Date(r.finishedAt).toLocaleString()}`,
-      onClick: () => setSymbol(r.symbol),
+      subtitle: `${(r.n_paths ?? 0).toLocaleString?.() ?? String(r.n_paths)} paths — ${
+        r.finishedAt ? new Date(r.finishedAt).toLocaleString() : "just now"
+      }`,
+      onClick: () => {
+        setSymbol(r.symbol);
+        setHorizon(r.horizon);
+        setPaths(r.n_paths);
+        throttledLog?.(`Loaded recent: ${r.symbol} • ${r.horizon}d • ${r.n_paths} paths`);
+      },
     }));
+
     //render
   return (
     <main className="min-h-screen bg-[#0b0b0d] text-[#F9F8F3]">
@@ -730,7 +747,9 @@ export default function App() {
                   min={1}
                   className="w-full px-2 py-1 rounded bg-[#13161a] border border-[#23262b] text-sm"
                   value={horizon}
-                  onChange={(e) => setHorizon(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : horizon)}
+                  onChange={(e) =>
+                    setHorizon(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : horizon)
+                  }
                   placeholder="30"
                   inputMode="numeric"
                   aria-label="Horizon in days"
@@ -744,7 +763,9 @@ export default function App() {
                   step={100}
                   className="w-full px-2 py-1 rounded bg-[#13161a] border border-[#23262b] text-sm"
                   value={paths}
-                  onChange={(e) => setPaths(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : paths)}
+                  onChange={(e) =>
+                    setPaths(Number.isFinite(e.currentTarget.valueAsNumber) ? e.currentTarget.valueAsNumber : paths)
+                  }
                   placeholder="2000"
                   inputMode="numeric"
                   aria-label="Number of Monte Carlo paths"
@@ -773,7 +794,8 @@ export default function App() {
                 Include news
               </label>
             </div>
-            {/* action buttons — now with hover + spinner */}
+
+            {/* action buttons */}
             <div className="mt-3 flex flex-wrap gap-2">
               <LoadingButton
                 label="Train"
@@ -797,11 +819,8 @@ export default function App() {
               <LoadingButton label="Label now" onClick={labelNowAction} />
               <LoadingButton label="Learn now" onClick={learnNowAction} />
             </div>
-            {/* recent runs */}
-            <div className="mt-4">
-              <RecentRunsRail runs={safeRunHistory.slice(0, 50) as any} onSelect={handleSelectRecent} />
-            </div>
           </Card>
+
           {/* Price Forecast */}
           <Card
             title="Price Forecast"
@@ -818,15 +837,7 @@ export default function App() {
             <div data-chart="fan">
               <ErrorBoundary>
                 <Suspense fallback={<ChartFallback />}>
-                  {!art ? (
-                    <EmptyState
-                      text="Run a simulation to view."
-                      actionLabel="Try NVDA 30d"
-                      onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                    />
-                  ) : (
-                    <FanChart artifact={art} />
-                  )}
+                  {art ? <FanChart artifact={art} /> : <div className="text-xs opacity-70">Run a simulation to view.</div>}
                 </Suspense>
               </ErrorBoundary>
               {art && (
@@ -836,6 +847,7 @@ export default function App() {
               )}
             </div>
           </Card>
+
           {/* Hit Probabilities */}
           <Card
             title="Hit Probabilities"
@@ -844,7 +856,9 @@ export default function App() {
             <div data-chart="hit">
               <ErrorBoundary>
                 <Suspense fallback={<ChartFallback />}>
-                  {art?.hit_probs && Array.isArray(art.hit_probs.thresholds_abs) && Array.isArray(art.hit_probs.probs_by_day) ? (
+                  {art?.hit_probs &&
+                  Array.isArray(art.hit_probs.thresholds_abs) &&
+                  Array.isArray(art.hit_probs.probs_by_day) ? (
                     <HitProbabilityRibbon
                       hit={{
                         thresholds_abs: art.hit_probs.thresholds_abs ?? [],
@@ -852,16 +866,13 @@ export default function App() {
                       }}
                     />
                   ) : (
-                    <EmptyState
-                      text="Run a simulation with hit probabilities."
-                      actionLabel="Try NVDA 30d"
-                      onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                    />
+                    <div className="text-xs opacity-70">Run a simulation with hit probabilities.</div>
                   )}
                 </Suspense>
               </ErrorBoundary>
             </div>
           </Card>
+
           {/* Terminal Distribution */}
           <Card
             title="Terminal Distribution"
@@ -877,16 +888,13 @@ export default function App() {
                       )}
                     />
                   ) : (
-                    <EmptyState
-                      text="No terminal distribution yet."
-                      actionLabel="Run NVDA 30d"
-                      onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                    />
+                    <div className="text-xs opacity-70">No terminal distribution yet.</div>
                   )}
                 </Suspense>
               </ErrorBoundary>
             </div>
           </Card>
+
           {/* Drivers */}
           <Card
             title="Drivers (Explainability)"
@@ -903,16 +911,13 @@ export default function App() {
                       }))}
                     />
                   ) : (
-                    <EmptyState
-                      text="No drivers yet."
-                      actionLabel="Try NVDA 30d"
-                      onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                    />
+                    <div className="text-xs opacity-70">No drivers yet.</div>
                   )}
                 </Suspense>
               </ErrorBoundary>
             </div>
           </Card>
+
           {/* Target Ladder */}
           <Card
             title="Target Ladder"
@@ -921,7 +926,9 @@ export default function App() {
             <div data-chart="ladder">
               <ErrorBoundary>
                 <Suspense fallback={<ChartFallback />}>
-                  {art?.hit_probs && Array.isArray(art.hit_probs.thresholds_abs) && Array.isArray(art.hit_probs.probs_by_day) ? (
+                  {art?.hit_probs &&
+                  Array.isArray(art.hit_probs.thresholds_abs) &&
+                  Array.isArray(art.hit_probs.probs_by_day) ? (
                     <TargetLadder
                       items={art.hit_probs.thresholds_abs.map((thr, i) => {
                         const lastT = Math.max(0, art.median_path.length - 1);
@@ -933,16 +940,13 @@ export default function App() {
                       })}
                     />
                   ) : (
-                    <EmptyState
-                      text="Run a simulation to populate the ladder."
-                      actionLabel="Try NVDA 30d"
-                      onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                    />
+                    <div className="text-xs opacity-70">Run a simulation to populate the ladder.</div>
                   )}
                 </Suspense>
               </ErrorBoundary>
             </div>
           </Card>
+
           {/* Run Summary */}
           <Card title="Run Summary">
             <ErrorBoundary>
@@ -955,14 +959,11 @@ export default function App() {
                   eod={eod || undefined}
                 />
               ) : (
-                <EmptyState
-                  text="Run a simulation to view summary."
-                  actionLabel="Try NVDA 30d"
-                  onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                />
+                <div className="text-xs opacity-70">Run a simulation to view summary.</div>
               )}
             </ErrorBoundary>
           </Card>
+
           {/* Activity Log */}
           <Card title="Activity Log">
             <div ref={logRef} className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs`}>
@@ -973,28 +974,51 @@ export default function App() {
               ))}
             </div>
           </Card>
+
           {/* Scenarios */}
           <Card title="Scenarios" className="md:col-span-2">
             <ErrorBoundary>
               <Suspense fallback={<ChartFallback />}>
-                {art ? (
-                  <ScenarioTiles artifact={art} />
-                ) : (
-                  <EmptyState
-                    text="—"
-                    actionLabel="Run NVDA 30d"
-                    onAction={() => handlePreset({ symbol: "NVDA", horizon: 30, paths: 1000 })}
-                  />
-                )}
+                {art ? <ScenarioTiles artifact={art} /> : <div className="text-xs opacity-70">—</div>}
               </Suspense>
             </ErrorBoundary>
           </Card>
           {/* Track Record */}
           <Card title="Track Record">
             <ErrorBoundary>
-              <TrackRecordPanel runs={safeRunHistory} />
+              <TrackRecordPanel
+                runs={useMemo(
+                  () =>
+                    (Array.isArray(runHistory) ? runHistory : []).map((r) => ({
+                      ...r,
+                      q50: isNum(r.q50) ? r.q50 : undefined,
+                      probUp: isNum(r.probUp) ? r.probUp : undefined,
+                    })),
+                  [runHistory]
+                )}
+              />
             </ErrorBoundary>
           </Card>
+          {/* Recent runs (inline under Scenarios) */}
+          {recentRuns.length > 0 && (
+            <section aria-labelledby="recents-heading" className="mt-6">
+              <h3 id="recents-heading" className="text-sm font-semibold mb-2 opacity-80">
+                Recent runs
+              </h3>
+              <div className="flex flex-col gap-2">
+                {recentRuns.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={item.onClick}
+                    className="text-left rounded-lg px-3 py-2 hover:bg-white/5 border border-white/10"
+                  >
+                    <div className="text-sm font-medium">{item.title}</div>
+                    <div className="text-xs text-white/60">{item.subtitle}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           {/* News */}
           <Card title="News">
             <ErrorBoundary>
@@ -1024,7 +1048,7 @@ export default function App() {
       </ErrorBoundary>
       {/* Right rail — recent only */}
       <ErrorBoundary>
-        <RightRail recent={recentRuns} className="xl:fixed xl:right-4 xl:top-24 xl:bottom-6" />
+        <RightRail recent={recentItems} className="px-4 pb-6 md:px-6" />
       </ErrorBoundary>
       {/* Footer actions */}
       <div className="px-4 py-6 flex items-center gap-2">
@@ -1034,6 +1058,7 @@ export default function App() {
           disabled={!art}
         >
           Export artifact JSON
+          <div className="p-4 rounded-lg border border-white/10">Tailwind v4 is working ✅</div>
         </button>
       </div>
     </main>

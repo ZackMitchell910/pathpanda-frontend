@@ -1,119 +1,117 @@
 // src/hooks/useNews.ts
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type NewsItem = {
+type NewsItem = {
   id: string;
   title: string;
   url: string;
-  published_at?: string;
-  source?: string;
-  summary?: string;
+  published_at: string;
+  source: string;
+  sentiment: number;
+  image_url?: string;
 };
 
 type UseNewsArgs = {
   symbol: string;
   includeNews: boolean;
-  limit?: number;
-  days?: number;
-  retry?: number;
-  apiBase: string;
-  getHeaders: () => Record<string, string>;
+  apiKey: string;           // PT_API_KEY for your backend
+  limit?: number;           // default 6
+  days?: number;            // default 7
   onLog?: (m: string) => void;
+  retry?: number;           // default 0
 };
 
-type UseNewsReturn = {
-  items: NewsItem[];
-  nextCursor: string | null;
-  loading: boolean;
-  error: string | null;
-  loadMore: () => Promise<void>;
-};
+const RAW_API_BASE =
+  (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
+  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
+  (import.meta as any)?.env?.VITE_API_BASE ||
+  (typeof process !== "undefined" && (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL) ||
+  "https://pathpanda-api.onrender.com";
 
-export default function useNews(args: UseNewsArgs): UseNewsReturn {
-  const { symbol, includeNews, limit = 8, days = 7, retry = 0, apiBase, getHeaders, onLog } = args;
+const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+const api = (p: string) => `${API_BASE}${p}`;
 
+export function useNews({
+  symbol,
+  includeNews,
+  apiKey,
+  limit = 6,
+  days = 7,
+  onLog,
+  retry = 0,
+}: UseNewsArgs) {
   const [items, setItems] = useState<NewsItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tried = useRef(0);
+  const sym = (symbol || "").trim().toUpperCase();
 
-  // Single fetch function that takes a cursor arg so its identity
-  // does NOT depend on "cursor" (prevents effect loops).
-  const fetchNews = useCallback(
-    async (cursorArg: string | null) => {
-      if (!includeNews) return;
+  const canFetch = includeNews && !!apiKey && !!sym;
+
+  const headers = useMemo(
+    () => ({
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+      Accept: "application/json",
+    }),
+    [apiKey]
+  );
+
+  const fetchPage = useCallback(
+    async (cursor?: string | null) => {
+      if (!canFetch) return;
       setLoading(true);
       setError(null);
       try {
-        const base = apiBase.replace(/\/+$/, "");
-        const s = (symbol || "NVDA").toUpperCase();
-        const headers = getHeaders();
-        const key = headers["X-API-Key"] || (headers as any)["x-api-key"] || "";
+        const u = new URL(api(`/api/news/${encodeURIComponent(sym)}`));
+        u.searchParams.set("limit", String(limit));
+        u.searchParams.set("days", String(days));
+        if (cursor) u.searchParams.set("cursor", cursor);
 
-        const params = new URLSearchParams({
-          limit: String(limit),
-          days: String(days),
-        });
-        if (cursorArg) params.set("cursor", cursorArg);
-        if (key) params.set("api_key", key);
-
-        const url = `${base}/api/news/${encodeURIComponent(s)}?${params.toString()}`;
-        const r = await fetch(url, { headers });
-        const text = await r.text();
-
+        const r = await fetch(u.toString(), { headers });
+        const txt = await r.text().catch(() => "");
         if (!r.ok) {
-          if (/^\s*<!doctype html>|<html/i.test(text)) {
-            throw new Error("Misrouted to HTML; check API base.");
-          }
-          const msg = `HTTP ${r.status} – ${text}`;
-          setError(msg);
-          onLog?.(`News error: ${msg}`);
-          return; // do not retry on server error here
+          const msg = txt || `HTTP ${r.status}`;
+          throw new Error(msg);
         }
-
-        let data: any;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          throw new Error(`Expected JSON, got: ${text.slice(0, 200)}`);
-        }
-
-        const list = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        setItems((prev) => (cursorArg ? [...prev, ...list] : list));
-        setCursor(data?.nextCursor ?? null);
-        onLog?.(`News: ${list.length} items${cursorArg ? " (more)" : ""}`);
+        const js = txt ? JSON.parse(txt) : {};
+        const newItems: NewsItem[] = Array.isArray(js?.items) ? js.items : [];
+        setItems((prev) => {
+          const seen = new Set(prev.map((p) => p.id));
+          const merged = [...prev];
+          for (const it of newItems) if (!seen.has(it.id)) merged.push(it);
+          return merged;
+        });
+        setNextCursor(js?.nextCursor ?? null);
+        onLog?.(`Fetched ${newItems.length} news items${cursor ? " (more)" : ""}`);
       } catch (e: any) {
         const msg = e?.message || String(e);
         setError(msg);
         onLog?.(`News error: ${msg}`);
-        // avoid infinite retry loops, especially on 401
-        if (tried.current < (retry || 0) && !/HTTP 401/.test(msg)) {
+        if (tried.current < (retry ?? 0)) {
           tried.current += 1;
-          setTimeout(() => fetchNews(cursorArg), 800);
+          setTimeout(() => fetchPage(cursor), 800);
         }
       } finally {
         setLoading(false);
       }
     },
-    [apiBase, symbol, limit, days, includeNews, getHeaders, onLog, retry]
+    [canFetch, days, fetch, headers, limit, onLog, retry, sym]
   );
 
-  // Reset & fetch on relevant inputs; DO NOT depend on "cursor" or "fetchNews" identity.
+  // initial load when inputs change
   useEffect(() => {
     setItems([]);
-    setCursor(null);
+    setNextCursor(null);
     tried.current = 0;
-    if (includeNews) {
-      void fetchNews(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, includeNews, limit, days]);
+    if (canFetch) fetchPage(null);
+  }, [canFetch, sym, limit, days, fetchPage]);
 
-  const loadMore = useCallback(async () => {
-    if (!includeNews || !cursor || loading) return;
-    await fetchNews(cursor);
-  }, [includeNews, cursor, loading, fetchNews]);
+  const loadMore = useCallback(() => {
+    if (loading || !nextCursor) return;
+    fetchPage(nextCursor);
+  }, [fetchPage, loading, nextCursor]);
 
-  return { items, nextCursor: cursor, loading, error, loadMore };
+  return { items, nextCursor, loading, error, loadMore };
 }

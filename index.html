@@ -1,26 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PathPanda - Predictive Market Dashboard</title>
-</head>
-<body>
-  <script>
-    addEventListener('error', e => {
-      const el = document.createElement('pre');
-      el.textContent = 'Runtime error: ' + (e?.error?.stack || e.message);
-      el.style.cssText='position:fixed;left:8px;bottom:8px;background:#111;color:#f66;padding:8px;z-index:99999;max-width:90vw;max-height:40vh;overflow:auto;font:12px monospace';
-      document.body.appendChild(el);
-    });
-    addEventListener('unhandledrejection', e => {
-      const el = document.createElement('pre');
-      el.textContent = 'Unhandled promise: ' + (e?.reason?.stack || e.reason);
-      el.style.cssText='position:fixed;left:8px;bottom:8px;background:#111;color:#f66;padding:8px;z-index:99999;max-width:90vw;max-height:40vh;overflow:auto;font:12px monospace';
-      document.body.appendChild(el);
-    });
-  </script>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <script>window.__PP_API_BASE__ = "";</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIMETRIX — Forecasting & Analytics</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Vite entry should point into src -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
