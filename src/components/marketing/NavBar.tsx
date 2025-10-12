@@ -1,12 +1,11 @@
-// NavBar.tsx
+// NavBar.tsx — monochrome, zero overflow
 "use client";
-
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import LogoTwinCore from "@/components/branding/LogoTwinCore";
 
 const links = [
-  { href: "#product", label: "Product", hasMenu: true }, // 🧩
+  { href: "#product", label: "Product", hasMenu: true },
   { href: "/docs", label: "Docs" },
   { href: "#pricing", label: "Pricing" },
   { href: "#contact", label: "Contact" },
@@ -14,11 +13,11 @@ const links = [
 
 export default function NavBar() {
   const [open, setOpen] = useState(false);
-  const [productOpen, setProductOpen] = useState(false); // 🧩
+  const [productOpen, setProductOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/10 backdrop-blur bg-black/50">
-      <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+    <header className="navbar sticky top-0 z-40">
+      <div className="container h-14 flex items-center justify-between">
         <a href="/" className="flex items-center gap-2">
           <LogoTwinCore className="h-6 w-6" />
           <span className="font-semibold tracking-wide">SIMETRIX</span>
@@ -42,23 +41,13 @@ export default function NavBar() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 6 }}
                       transition={{ duration: 0.15 }}
-                      className="absolute left-0 mt-2 w-64 rounded-xl border border-white/10 bg-zinc-950/95 shadow-2xl p-2"
+                      className="absolute left-0 mt-2 w-72 rounded-xl border border-white/10 bg-black/90 shadow-2xl p-2"
                     >
-                      <a
-                        href="/app"
-                        className="block rounded-lg px-3 py-2 hover:bg-white/5"
-                      >
+                      <a href="/app" className="block rounded-lg px-3 py-2 hover:bg-white/5">
                         <div className="text-sm font-medium">SIMETRIX</div>
-                        <div className="text-xs text-white/60">
-                          Simulations, accuracy tracking, cohorts
-                        </div>
+                        <div className="text-xs text-white/60">Simulations • Accuracy • Cohorts</div>
                       </a>
-                      {/* Future products can slot in here */}
-                      {/* <a href="/market-twin" className="block rounded-lg px-3 py-2 hover:bg-white/5">...</a> */}
-                      <a
-                        href="#product"
-                        className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/5 text-xs text-white/60"
-                      >
+                      <a href="#product" className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/5 text-xs text-white/60">
                         Learn more
                       </a>
                     </motion.div>
@@ -73,43 +62,44 @@ export default function NavBar() {
           )}
           <a
             href="/app"
-            className="rounded-lg px-3 py-2 bg-emerald-500/15 ring-1 ring-emerald-400/30 text-emerald-200 font-medium hover:brightness-110 transition"
+            className="rounded-lg px-3 py-2 border border-white/20 hover:bg-white/5 transition"
           >
             Run Simulation
           </a>
         </nav>
 
-        {/* Mobile toggle */}
+        {/* Mobile toggle (monochrome) */}
         <button
-          className="md:hidden rounded-lg px-3 py-2 border border-white/15"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen((s) => !s)}
+          className="md:hidden rounded-lg px-3 py-2 border border-white/20 text-white/80"
+          aria-expanded={open}
+          aria-label="Toggle menu"
         >
           Menu
         </button>
       </div>
 
-      {/* Mobile sheet */}
+      {/* Mobile menu — ensure no horizontal overflow */}
       <AnimatePresence>
         {open && (
           <motion.nav
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur"
+            className="md:hidden border-t border-white/10 bg-black/95"
           >
-            <div className="px-4 py-3 flex flex-col gap-2">
-              {/* Product submenu for mobile */}
-              <div className="rounded-lg border border-white/10">
+            <div className="container py-3 flex flex-col gap-2">
+              <div className="rounded-lg border border-white/12">
                 <div className="px-3 py-2 text-white/80">Product</div>
                 <a href="/app" onClick={() => setOpen(false)} className="block px-3 py-2 hover:bg-white/5">
-                  Predictive Twin
+                  SIMETRIX
                 </a>
                 <a href="#product" onClick={() => setOpen(false)} className="block px-3 py-2 hover:bg-white/5 text-sm text-white/60">
                   Learn more
                 </a>
               </div>
 
-              <a href="#docs" onClick={() => setOpen(false)} className="rounded-lg px-3 py-2 hover:bg-white/5">
+              <a href="/docs" onClick={() => setOpen(false)} className="rounded-lg px-3 py-2 hover:bg-white/5">
                 Docs
               </a>
               <a href="#pricing" onClick={() => setOpen(false)} className="rounded-lg px-3 py-2 hover:bg-white/5">
@@ -122,7 +112,7 @@ export default function NavBar() {
               <a
                 href="/app"
                 onClick={() => setOpen(false)}
-                className="mt-2 rounded-lg px-3 py-2 bg-emerald-500/15 ring-1 ring-emerald-400/30 text-emerald-200 font-semibold text-center hover:brightness-110 transition"
+                className="mt-2 rounded-lg px-3 py-2 border border-white/20 text-center hover:bg-white/5 transition"
               >
                 Run Simulation
               </a>

@@ -1,15 +1,14 @@
 // src/landing/Landing.tsx
-import React, { useState } from "react";
+import React, { useState, useLayoutEffect } from "react";
 import { motion } from "framer-motion";
 import NavBar from "@/components/marketing/NavBar";
 import BackgroundOrbs from "@/components/marketing/BackgroundOrbs";
-import HeroNarrativeFlowCascade from "@/components/marketing/HeroNarrativeFlowCascade"; // Primary hero visualization
+import HeroNarrativeFlowCascade from "@/components/marketing/HeroNarrativeFlowCascade";
 import FeatureTiles from "@/components/marketing/FeatureTiles";
 import IntegrationsRow from "@/components/marketing/IntegrationsRow";
 import Footer from "@/components/marketing/Footer";
 
-
-// ---- Browser-safe API base (Vite + Netlify) ----
+// ---- Browser-safe API base (Vite + Vercel/Render) ----
 const RAW_API_BASE =
   (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
   (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
@@ -20,7 +19,7 @@ const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
 const api = (p: string) => `${API_BASE}${p}`;
 const SHOW_HEALTH = import.meta.env.DEV || import.meta.env.VITE_SHOW_HEALTH === "1";
 
-// ---- Dev/opt-in health check (hidden in prod) ----
+// ---- Dev-only health check (hidden in prod) ----
 function HealthCheck() {
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "fail">("idle");
   const [detail, setDetail] = useState("");
@@ -44,14 +43,14 @@ function HealthCheck() {
       <div className="flex items-center gap-3">
         <button
           onClick={run}
-          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition"
+          className="px-4 py-2 rounded-xl bg-[#CBA135] text-black font-semibold hover:brightness-110 transition"
         >
           Recheck /health
         </button>
         <span
           className={
             status === "ok"
-              ? "text-emerald-400"
+              ? "text-[#CBA135]"
               : status === "fail"
               ? "text-rose-400"
               : status === "loading"
@@ -75,11 +74,20 @@ function HealthCheck() {
 }
 
 export default function Landing() {
-  const gradientBg =
-    "bg-[radial-gradient(1200px_600px_at_70%_-10%,rgba(52,211,153,0.18),transparent_60%),radial-gradient(800px_400px_at_10%_20%,rgba(125,211,252,0.14),transparent_60%)]";
+  // Replace useEffect with useLayoutEffect for synchronous class application
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    html.classList.add("landing-html");
+    body.classList.add("landing-body");
+    return () => {
+      html.classList.remove("landing-html");
+      body.classList.remove("landing-body");
+    };
+  }, []);
 
   return (
-    <main className={`relative min-h-screen bg-[#0A111A] text-[#F9F8F3] ${gradientBg}`}>
+    <main className="landing-shell relative overflow-x-hidden">
       <BackgroundOrbs />
       <NavBar />
 
@@ -92,7 +100,7 @@ export default function Landing() {
           transition={{ duration: 0.6 }}
           className="font-semibold text-4xl md:text-6xl leading-tight tracking-tight"
         >
-          Simulate Markets Before They Move
+          AI-Driven Simulations for Unrivaled Market Insight
         </motion.h1>
 
         <p className="mt-4 max-w-2xl mx-auto text-white/75">
@@ -102,21 +110,27 @@ export default function Landing() {
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
           <a
             href="/app"
-            className="rounded-lg px-5 py-3 bg-emerald-400 text-[#0A111A] font-semibold hover:brightness-110 transition"
+            className={[
+              "inline-flex items-center justify-center",
+              "rounded-xl px-5 py-3 text-sm sm:text-base font-semibold",
+              "bg-[#CBA135] text-black",
+              "ring-1 ring-[rgba(227,192,90,0.40)]",
+              "transition hover:brightness-110 hover:shadow-[0_0_28px_0_rgba(203,161,53,0.28)]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E3C05A]"
+            ].join(" ")}
             aria-label="Run a simulation"
           >
             Run a Simulation
           </a>
           <a
             href="#product"
-            className="rounded-lg px-5 py-3 border border-white/20 hover:border-white/40 transition"
+            className="rounded-xl px-5 py-3 border border-white/20 hover:border-white/40 transition"
             aria-label="View the product demo"
           >
             View Demo
           </a>
         </div>
 
-        {/* Primary hero visualization */}
         <div className="mt-10" role="img" aria-label="Interactive simulation visualization">
           <HeroNarrativeFlowCascade height={380} />
         </div>
@@ -124,12 +138,12 @@ export default function Landing() {
         <FeatureTiles />
       </section>
 
-      {/* ============= Features / Integrations ============= */}
+      {/* Features / Integrations */}
       <section className="mx-auto max-w-6xl px-4 py-20">
         <IntegrationsRow />
       </section>
 
-      {/* ============= Product ============= */}
+      {/* Product */}
       <section id="product" className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="grid md:grid-cols-2 gap-8 items-center">
           <motion.div
@@ -150,7 +164,12 @@ export default function Landing() {
             </ul>
             <a
               href="#pricing"
-              className="inline-block px-5 py-3 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 hover:brightness-110 transition"
+              className={[
+                "inline-block px-5 py-3 rounded-xl font-semibold",
+                "bg-[#CBA135] text-black",
+                "ring-1 ring-[rgba(227,192,90,0.40)]",
+                "transition hover:brightness-110 hover:shadow-[0_0_28px_0_rgba(203,161,53,0.28)]"
+              ].join(" ")}
             >
               See Pricing
             </a>
@@ -161,22 +180,19 @@ export default function Landing() {
             transition={{ duration: 0.6 }}
             className="rounded-2xl border border-white/10 p-6 bg-white/5"
           >
-            {/* Placeholder for product screenshot or mini-demo */}
-            <div className="h-64 bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 rounded-xl flex items-center justify-center text-white/40">
+            <div className="h-64 bg-gradient-to-br from-[rgba(203,161,53,0.10)] to-[rgba(255,255,255,0.06)] rounded-xl flex items-center justify-center text-white/40">
               Dashboard Preview
             </div>
           </motion.div>
         </div>
       </section>
 
-      {/* ============= Docs ============= */}
+      {/* Docs */}
       <section id="docs" className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="grid md:grid-cols-2 gap-8">
           <div className="space-y-6">
             <h2 className="font-brand text-3xl">Docs</h2>
-            <p className="text-white/80">
-              SDKs in TS/JS, Python. Start with /sim endpoint for quick forecasts.
-            </p>
+            <p className="text-white/80">SDKs in TS/JS, Python. Start with /sim endpoint for quick forecasts.</p>
             <ul className="text-sm space-y-2 text-white/70">
               <li>• TS SDK: npm i @simetrix/sdk</li>
               <li>• Python: pip install simetrix-py</li>
@@ -186,7 +202,7 @@ export default function Landing() {
             </ul>
             <div className="mt-6">
               <a
-                href="https://docs.simetrix.ai" // Update with actual docs URL
+                href="https://docs.simetrix.io"
                 className="rounded-lg px-4 py-2 bg-white/5 border border-white/10 hover:border-white/30 transition"
               >
                 Open API &amp; Usage Examples
@@ -208,7 +224,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ============= Pricing ============= */}
+      {/* Pricing */}
       <section id="pricing" className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="text-center mb-12">
           <h2 className="font-brand text-3xl md:text-4xl">Pricing</h2>
@@ -229,26 +245,39 @@ export default function Landing() {
               <li>Fan-chart preview</li>
               <li>Basic docs</li>
             </ul>
-            <a href="/app" className="mt-auto rounded-lg px-4 py-2 border border-white/15 hover:border-white/30 text-center transition">
+            <a
+              href="/app"
+              className="mt-auto rounded-lg px-4 py-2 border border-white/15 hover:border-white/30 text-center transition"
+            >
               Get Started
             </a>
           </motion.div>
 
-          {/* Pro */}
+          {/* Pro (gold accent) */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-emerald-400/30 ring-1 ring-emerald-400/30 bg-emerald-500/5 p-6 flex flex-col"
+            className="rounded-2xl border border-[rgba(203,161,53,0.30)] ring-1 ring-[rgba(227,192,90,0.40)] bg-[rgba(203,161,53,0.05)] p-6 flex flex-col"
           >
-            <div className="text-sm font-semibold text-emerald-200">Pro</div>
-            <div className="text-3xl font-bold mt-2">$39<span className="text-base text-white/60">/mo</span></div>
+            <div className="text-sm font-semibold text-[#CBA135]">Pro</div>
+            <div className="text-3xl font-bold mt-2">
+              $39<span className="text-base text-white/60">/mo</span>
+            </div>
             <ul className="text-sm text-white/70 mt-4 space-y-2 flex-1">
               <li>All symbols + custom watchlists</li>
               <li>Full fan-chart + terminal analysis</li>
               <li>Track Record &amp; cohort explorer</li>
               <li>Email summaries (weekly)</li>
             </ul>
-            <a href="/app" className="mt-auto rounded-lg px-4 py-2 bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30 text-center hover:brightness-110 transition">
+            <a
+              href="/app"
+              className={[
+                "mt-auto rounded-lg px-4 py-2 text-center font-semibold",
+                "bg-[#CBA135] text-black",
+                "ring-1 ring-[rgba(227,192,90,0.40)]",
+                "transition hover:brightness-110 hover:shadow-[0_0_22px_0_rgba(203,161,53,0.25)]"
+              ].join(" ")}
+            >
               Start Pro
             </a>
           </motion.div>
@@ -267,7 +296,10 @@ export default function Landing() {
               <li>Export &amp; API quotas</li>
               <li>Priority roadmap</li>
             </ul>
-            <a href="#contact" className="mt-auto rounded-lg px-4 py-2 border border-white/15 hover:border-white/30 text-center transition">
+            <a
+              href="#contact"
+              className="mt-auto rounded-lg px-4 py-2 border border-white/15 hover:border-white/30 text-center transition"
+            >
               Contact Sales
             </a>
           </motion.div>
@@ -277,7 +309,7 @@ export default function Landing() {
         </p>
       </section>
 
-      {/* ============= Open Dashboard ============= */}
+      {/* Open Dashboard */}
       <section className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="grid md:grid-cols-2 gap-8 items-center">
           <div>
@@ -287,22 +319,25 @@ export default function Landing() {
             </p>
             <a
               href="/app"
-              className="inline-block px-5 py-3 rounded-xl bg-white text-black font-medium hover:opacity-90 transition"
+              className={[
+                "inline-block px-5 py-3 rounded-xl font-semibold",
+                "bg-[#CBA135] text-black",
+                "ring-1 ring-[rgba(227,192,90,0.40)]",
+                "transition hover:brightness-110 hover:shadow-[0_0_24px_0_rgba(203,161,53,0.24)]"
+              ].join(" ")}
               aria-label="Access the dashboard"
             >
               Open the Dashboard
             </a>
           </div>
           <div className="rounded-2xl border border-white/10 p-4 bg-white/5">
-            {/* Optional: small screenshot or animated preview */}
-            <div className="h-48 bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 rounded-xl flex items-center justify-center text-white/40">
+            <div className="h-48 bg-gradient-to-br from-[rgba(203,161,53,0.10)] to-[rgba(255,255,255,0.06)] rounded-xl flex items-center justify-center text-white/40">
               Live Dashboard View
             </div>
           </div>
         </div>
       </section>
 
-      {/* Health Check (Dev Only) */}
       {SHOW_HEALTH && <HealthCheck />}
 
       <Footer />

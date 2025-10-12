@@ -158,12 +158,14 @@ export const TerminalDistribution: React.FC<{
   );
 };
 /* -------------------------- DriversWaterfall ------------------------ */
-
 export const DriversWaterfall: React.FC<{
-  drivers: { name: string; weight: number }[];
+  drivers?: { name: string; weight: number }[];
 }> = ({ drivers }) => {
-  const labels = drivers.map((d) => d.name);
-  const dataVals = drivers.map((d) => d.weight);
+  const rows = Array.isArray(drivers) ? drivers : [];
+  if (!rows.length) return <div className="text-xs opacity-70">No drivers yet.</div>;
+
+  const labels = rows.map((d) => String(d?.name ?? ""));
+  const dataVals = rows.map((d) => (Number.isFinite(d?.weight) ? Number(d.weight) : 0));
 
   const [explanation, setExplanation] = React.useState<string | null>(null);
   const fetchExplanation = async (driver: string) =>
@@ -205,32 +207,44 @@ export const DriversWaterfall: React.FC<{
 };
 
 /* ----------------------------- ScenarioTiles ----------------------------- */
-
 export const ScenarioTiles: React.FC<{
-  artifact: Artifact;
-  reps: { label: string; path: [number, number][] }[];
+  artifact?: Artifact;
+  reps?: { label: string; path: [number, number][] }[];
 }> = ({ artifact, reps }) => {
-  const labels = makeTimeLabels(artifact);
-  const data: ChartData<"line"> = {
-    labels,
-    datasets: [
-      {
-        label: "Median",
-        data: artifact.median_path.map(([, y]) => y),
-        borderColor: PP_COLORS.median,
-        borderWidth: 2,
-        pointRadius: 0,
-      },
+  const labels =
+    Array.isArray(artifact?.median_path) && artifact!.median_path.length
+      ? artifact!.median_path.map(([t]) => `D${t}`)
+      : [];
+
+  const datasets: ChartData<"line">["datasets"] = [];
+
+  if (labels.length && Array.isArray(artifact?.median_path)) {
+    datasets.push({
+      label: "Median",
+      data: artifact!.median_path.map(([, y]) => y),
+      borderColor: PP_COLORS.median,
+      borderWidth: 2,
+      pointRadius: 0,
+    });
+  }
+
+  if (Array.isArray(reps) && reps.length) {
+    datasets.push(
       ...reps.map((r) => ({
         label: r.label,
-        data: r.path.map(([, y]) => y),
+        data: (Array.isArray(r.path) ? r.path : []).map(([, y]) => y),
         borderColor: r.label.toLowerCase().includes("bull") ? PP_COLORS.bull : PP_COLORS.bear,
         borderWidth: 2,
         pointRadius: 0,
-      })),
-    ],
-  };
+      }))
+    );
+  }
 
+  if (!labels.length || !datasets.length) {
+    return <div className="text-xs opacity-70">No scenarios computed.</div>;
+  }
+
+  const data: ChartData<"line"> = { labels, datasets };
   const options: ChartOptions<"line"> = {
     responsive: true,
     maintainAspectRatio: false,
@@ -243,6 +257,7 @@ export const ScenarioTiles: React.FC<{
     </div>
   );
 };
+
 
 /* ----------------------------- TargetLadder ------------------------------ */
 // Keep in src/components/PredictiveAddOns.tsx (or its own file) – full replacement
@@ -296,43 +311,52 @@ export function HitProbabilityRibbon({
   S0,
   pathMatrixAbove,
 }: {
-  artifact: {
-    symbol: string;
-    horizon_days: number;
-    // extra fields allowed (ignored here)
+  artifact?: {
+    symbol?: string;
+    horizon_days?: number;
     median_path?: [number, number][];
-    bands?: Bands;
     hit_probs?: { thresholds_abs?: number[]; probs_by_day?: number[][] };
   };
   thresholds?: number[];
-  S0: number;
-  pathMatrixAbove: (tIndex: number, thresholdAbs: number) => number;
+  S0?: number;
+  pathMatrixAbove?: (tIndex: number, thresholdAbs: number) => number;
 }) {
-  const probsFromBackend = artifact.hit_probs?.probs_by_day;
-  const thresholdsAbsFromBackend = artifact.hit_probs?.thresholds_abs;
+  const probsFromBackend = artifact?.hit_probs?.probs_by_day;
+  const thresholdsAbsFromBackend = artifact?.hit_probs?.thresholds_abs;
 
-  // T = series length from backend if present, else horizon_days + 1 (to include D0)
   const T =
     probsFromBackend?.[0]?.length ??
-    Math.max(0, Number.isFinite(artifact.horizon_days) ? artifact.horizon_days + 1 : 0);
+    (Number.isFinite(artifact?.horizon_days) ? (artifact!.horizon_days as number) + 1 : 0);
+
+  if (!T) {
+    return <div className="text-xs opacity-70">Run a simulation to see hit probabilities.</div>;
+  }
 
   const labels = Array.from({ length: T }, (_, i) => `D${i}`);
+  const s0 =
+    typeof S0 === "number"
+      ? S0
+      : Array.isArray(artifact?.median_path) && artifact!.median_path.length
+      ? artifact!.median_path[0][1]
+      : undefined;
 
-  // Use backend thresholds if provided; otherwise % thresholds
   const thresholdsPct: number[] =
-    thresholdsAbsFromBackend && thresholdsAbsFromBackend.length
-      ? thresholdsAbsFromBackend.map((abs) => abs / S0 - 1)
+    thresholdsAbsFromBackend && thresholdsAbsFromBackend.length && typeof s0 === "number"
+      ? thresholdsAbsFromBackend.map((abs) => abs / s0 - 1)
       : thresholds;
+
+  const safePathMatrixAbove = pathMatrixAbove ?? ((_t: number, _thrAbs: number) => 0);
 
   const probsByDay: number[][] =
     probsFromBackend && probsFromBackend.length
       ? probsFromBackend
-      : thresholdsPct.map((th) =>
-          Array.from({ length: T }, (_, t) => pathMatrixAbove(t, (1 + th) * S0))
-        );
+      : typeof s0 === "number"
+      ? thresholdsPct.map((th) =>
+          Array.from({ length: T }, (_, t) => safePathMatrixAbove(t, (1 + th) * s0))
+        )
+      : thresholdsPct.map(() => Array.from({ length: T }, () => 0));
 
   const palette = ["#34D399", "#22D3EE", "#60A5FA", "#FBBF24"];
-
   const datasets = probsByDay.map((series, i) => ({
     label: `Above ${Math.round(thresholdsPct[i] * 100)}%`,
     data: series,
@@ -343,7 +367,6 @@ export function HitProbabilityRibbon({
   }));
 
   const data: ChartData<"line"> = { labels, datasets };
-
   const options: ChartOptions<"line"> = {
     responsive: true,
     maintainAspectRatio: false,
