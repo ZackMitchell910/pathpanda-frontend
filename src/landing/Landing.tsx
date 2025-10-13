@@ -150,12 +150,6 @@ export default function Landing() {
 
         <FeatureTiles />
       </section>
-
-      {/* Integrations */}
-      <section className="mx-auto max-w-6xl px-4 py-20">
-        <IntegrationsRow />
-      </section>
-
       {/* Product */}
       <section id="product" className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="grid md:grid-cols-2 gap-8 items-center">
@@ -269,7 +263,6 @@ export default function Landing() {
               Get Started
             </a>
           </motion.div>
-
           {/* Pro */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -326,7 +319,10 @@ export default function Landing() {
           * Pricing subject to change during beta. Some features may be limited or roll out gradually.
         </p>
       </section>
-
+      {/* Integrations */}
+      <section className="mx-auto max-w-6xl px-4 py-20">
+        <IntegrationsRow />
+      </section>
       {/* Open Dashboard */}
       <section className="mx-auto max-w-6xl px-4 py-20 border-t border-white/10">
         <div className="grid md:grid-cols-2 gap-8 items-center">
