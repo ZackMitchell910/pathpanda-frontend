@@ -102,14 +102,13 @@ export default function SimSummaryCard({
   }, [apiBase, runId, headers]);
 
   // Placeholder while pending / no data
-  if (!runId || loading || !data) {
+  if (loading || !data) {
     return (
       <div className="p-4 rounded-xl border border-white/10 bg-white/5 text-sm opacity-60">
-        Powered by XAi.
+        Powered by xAI.
       </div>
     );
   }
-
   return (
     <section className="p-4 rounded-xl border border-white/10 bg-white/5">
       <div className="flex items-center justify-between">

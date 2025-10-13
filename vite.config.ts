@@ -9,9 +9,12 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 1000, // Increase to 1000 kB (or higher as needed)
+    sourcemap: true,
+  },
   // (Optional) If some third-party code expects `process.env` in the browser:
   define: {
     "process.env": {},
-  build: { sourcemap: true }
   },
 });

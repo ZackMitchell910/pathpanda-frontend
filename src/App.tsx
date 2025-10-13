@@ -18,10 +18,10 @@ import RightRail from "./components/RightRail";
 import { TrackRecordPanel } from "./components/TrackRecordPanel";
 import { EmptyState } from "@/components/EmptyState";
 import { CardMenu } from "@/components/ui/CardMenu";
-import LogoTwinCore from "@/components/branding/LogoTwinCore";
+import LogoSimetrix from "@/components/branding/LogoSimetrix";
 import LoadingButton from "./components/ui/LoadingButton";
 import RecentRunsRail from "./components/RecentRunsRail";
-import { Card as UICard } from "@/components/ui/card";
+import { Card as UICard } from "@/components/ui/card"; 
 import SimSummaryCard from "./components/SimSummaryCard";
 import TargetsAndOdds from "./TargetsAndOdds";
 import ListCard from "./ListCard";
@@ -34,7 +34,9 @@ const FanChart = React.lazy(() => import("./components/FanChart"));
 const HitProbabilityRibbon = React.lazy(() =>
   import("./components/PredictiveAddOns").then((m) => ({ default: m.HitProbabilityRibbon }))
 );
-const TerminalDistribution = React.lazy(() => import("./components/TerminalDistribution"));
+const TerminalDistribution = React.lazy(() =>
+  () => import("./components/TerminalDistribution")
+);
 const ScenarioTiles = React.lazy(() =>
   import("./components/PredictiveAddOns").then((m) => ({ default: m.ScenarioTiles }))
 );
@@ -82,6 +84,7 @@ interface MCArtifact {
     horizon_days: number;
     levels: Array<{ label: string; price: number; hitEver?: number; hitByEnd?: number; tMedDays?: number }>;
   };
+  prob_up_next?: number;
 }
 
 
@@ -190,6 +193,7 @@ export default function App() {
   const [logMessages, setLogMessages] = useState<string[]>([]);
   const [drivers, setDrivers] = useState<{ feature: string; weight: number }[]>([]);
   const [probUp, setProbUp] = useState(0);
+  const [probUpNext, setProbUpNext] = useState<number | null>(null); // next-bar
   const [art, setArt] = useState<MCArtifact | null>(null);
   const [progress, setProgress] = useState(0);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
@@ -541,6 +545,7 @@ export default function App() {
       }
       const js = JSON.parse(text);
       const pu = Number(js?.prob_up_next);
+      if (Number.isFinite(pu)) setProbUpNext(pu);
       throttledLog(`Prediction: Prob Up Next = ${Number.isFinite(pu) ? (pu * 100).toFixed(2) : "?"}%`);
     } catch (e: any) {
       throttledLog(`Error: ${e.message || e}`);
@@ -568,7 +573,8 @@ export default function App() {
     setDrivers([]);
     setProbUp(0);
     setCurrentPrice(null);
-    setRunId(null);   
+    setRunId(null);
+    setProbUpNext(null);   
 
     try {
       const payload: any = {
@@ -656,6 +662,30 @@ export default function App() {
       setDrivers(artf.drivers || []);
       setProbUp(artf.prob_up_end || 0);
       setCurrentPrice((artf as any).spot ?? artf.median_path?.[0]?.[1] ?? null);
+      const puFromArtifact = Number((artf as any)?.prob_up_next);
+      if (Number.isFinite(puFromArtifact)) {
+        setProbUpNext(puFromArtifact);
+        throttledLog(`Next-bar P(up) from artifact: ${(puFromArtifact * 100).toFixed(2)}%`);
+      } else {
+        // Fallback: make a quick /predict call to populate prob_up_next
+        try {
+          const r = await fetch(api("/predict"), {
+            method: "POST",
+            credentials: "include",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ symbol: symbol.toUpperCase(), horizon_days: Math.min(hNum, 365) }),
+          });
+          const t = await safeText(r);
+          if (r.ok) {
+            const js = JSON.parse(t);
+            const pu = Number(js?.prob_up_next);
+            if (Number.isFinite(pu)) {
+              setProbUpNext(pu);
+              throttledLog(`Next-bar P(up): ${(pu * 100).toFixed(2)}%`);
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
       // 🔥 Warm the LLM summary cache (non-blocking)
       try {
         // If your /runs/{id}/summary is public:
@@ -684,7 +714,6 @@ export default function App() {
             `${tag} Most likely (mode) at H${hNum}d: $${Number(ml).toFixed(2)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`
           );
         }
-
         // Optional: also surface a compact HDI
         const hdi = (artf as any)?.hdi10;
         if (hdi && Number.isFinite(hdi.low) && Number.isFinite(hdi.high)) {
@@ -693,8 +722,6 @@ export default function App() {
           );
         }
       } catch {}
-
-
       // Save to recent runs
       setRunHistory((prev) => {
         const updated = [
@@ -801,17 +828,13 @@ const targetsRows = React.useMemo(() => {
         {/* Header */}
         <div className="px-4 pt-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <LogoTwinCore size={28} glow />
+            <LogoSimetrix
+              size={28}
+              tone={theme === "dark" ? "light" : "dark"}
+              lockup="horizontal"    // "icon" | "horizontal" | "stacked"
+              animated={false}       // flip to true if you want subtle bar “breathing”
+            />
             <h1 className="text-xl font-semibold">SIMETRIX</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-              className="px-3 py-1 rounded bg-[#13161a] border border-[#23262b] text-sm"
-              type="button"
-            >
-              {theme === "dark" ? "Light" : "Dark"}
-            </button>
           </div>
         </div> 
         {/* Daily Quant + KPI strip (inline on md+) */}
@@ -823,7 +846,6 @@ const targetsRows = React.useMemo(() => {
                 <div className="text-sm opacity-70">Daily Quant Picks</div>
                 {/* optional: refresh control later */}
               </div>
-
               <div className="mt-2">
                 <DailyQuantCard
                   apiBase={API_BASE}
@@ -860,7 +882,14 @@ const targetsRows = React.useMemo(() => {
                 <div className="opacity-60">P(up)</div>
                 <div className={`font-mono ${probMeta.color}`}>{fmtPct(probMeta.v)}</div>
               </div>
-
+              <div>
+                <div className="opacity-60">P(up next)</div>
+                <div className="font-mono">
+                  {Number.isFinite(probUpNext as any)
+                    ? fmtPct(probUpNext!)
+                    : "—"}
+                </div>
+              </div>
               {/* Median Δ at horizon */}
               <div>
                 <div className="opacity-60">Median Δ (H)</div>
@@ -1108,7 +1137,7 @@ const targetsRows = React.useMemo(() => {
           <TargetsAndOdds
             spot={art?.targets?.spot ?? currentPrice ?? 0}
             horizonDays={art?.targets?.horizon_days ?? Number(horizon || 0)}
-            rows={rows}
+            rows={targetsRows}
           />
           {/* Terminal Distribution */}
           <Card

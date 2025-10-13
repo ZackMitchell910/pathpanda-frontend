@@ -8,6 +8,7 @@ import DocsPage from "./Docs";              // ← add
 import "@/debug/hookGlobalErrors";
 import "./globals.css";
 import { inject } from '@vercel/analytics';
+import "chart.js/auto";
 
 if (import.meta.env.PROD) {
   inject();

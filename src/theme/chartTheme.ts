@@ -1,67 +1,110 @@
-// src/theme/chartTheme.ts — Tech-Noir defaults + deep gold accent
-import { Chart as ChartJS } from "chart.js";
+// src/theme/chartTheme.ts
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  TimeScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Filler,
+  Tooltip,
+  Legend,
+} from "chart.js";
+import type { ChartOptions } from "chart.js";
 
-/** Deep, rich gold accent */
-export const GOLD = "#CBA135";
-export const GOLD_GLOW = "rgba(203,161,53,0.45)";
-
-/** Backward-compatible color map used across components (e.g., Card.tsx) */
+/** Brand colors used across charts */
 export const PP_COLORS = {
-  // brand / accent
-  gold: GOLD,
-  goldGlow: GOLD_GLOW,
-  accent: GOLD,
-
-  // monochrome UI
-  white: "#FFFFFF",
-  fg: "#E5E7EB",
-  muted: "#9CA3AF",
+  bg: "rgba(17,17,20,1)",
   grid: "rgba(255,255,255,0.08)",
-  border: "rgba(255,255,255,0.12)",
-  bg: "#000000",
-  panel: "#0D0D0F",
-
-  // semantic (charts/status)
-  green: "#10B981",   // up
-  red: "#EF4444",     // down
-  indigo: "#6366F1",  // secondary accent (Quick Sim)
-  blue: "#3B82F6",
-  amber: "#F59E0B",
+  text: "rgba(255,255,255,0.82)",
+  subtext: "rgba(255,255,255,0.55)",
+  green: "rgba(16,185,129,1)",
+  red: "rgba(239,68,68,1)",
+  blue: "rgba(59,130,246,1)",
+  amber: "rgba(245,158,11,1)",
 };
+export const GOLD  = PP_COLORS.amber;
+export const BLUE  = PP_COLORS.blue;
+export const GREEN = PP_COLORS.green;
+export const RED   = PP_COLORS.red;
+export const TEXT  = PP_COLORS.text;
+export const GRID  = PP_COLORS.grid;
+export const BG    = PP_COLORS.bg;
 
-/** Apply global Chart.js dark theme (monochrome grid/labels; charts keep their own colors) */
+/** Call once at app start to register plugins + set global defaults */
 export function applyChartTheme() {
-  const C = ChartJS.defaults;
+  Chart.register(
+    CategoryScale,
+    LinearScale,
+    TimeScale,
+    PointElement,
+    LineElement,
+    BarElement,
+    Filler,
+    Tooltip,
+    Legend
+  );
 
-  // Global text/colors
-  C.color = PP_COLORS.fg;
-  C.responsive = true;
-  C.maintainAspectRatio = false;
-
-  // Font
-  C.font.family =
-    "'Oswald', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial";
-
-  // Elements
-  C.elements.line.borderWidth = 2;
-  C.elements.point.radius = 0;
-
-  // Tooltip
-  C.plugins.tooltip.backgroundColor = "rgba(0,0,0,0.92)";
-  C.plugins.tooltip.borderColor = PP_COLORS.border;
-  C.plugins.tooltip.borderWidth = 1;
-  C.plugins.tooltip.titleColor = PP_COLORS.white;
-  C.plugins.tooltip.bodyColor = PP_COLORS.fg;
-  C.plugins.tooltip.displayColors = false;
-
-  // Scales (base defaults)
-  // @ts-ignore allow base "scale" defaults
-  C.scale = C.scale || {};
-  // @ts-ignore
-  C.scale.grid = { color: PP_COLORS.grid, drawTicks: false };
-  // @ts-ignore
-  C.scale.ticks = { color: "#C7C9D1", maxRotation: 0 };
+  // Global defaults
+  Chart.defaults.color = PP_COLORS.text;
+  Chart.defaults.borderColor = "rgba(255,255,255,0.12)";
+  Chart.defaults.font.family = "Oswald, ui-sans-serif, system-ui, -apple-system";
+  Chart.defaults.plugins.legend.display = false;
+  Chart.defaults.plugins.tooltip.backgroundColor = "rgba(0,0,0,0.85)";
+  Chart.defaults.plugins.tooltip.titleColor = PP_COLORS.text;
+  Chart.defaults.plugins.tooltip.bodyColor = PP_COLORS.text;
 }
 
-/** Optional convenience default (helps if anything used a default import) */
-export default { PP_COLORS, GOLD, GOLD_GLOW, applyChartTheme };
+/** Merge chart options with Simetrix base styling per-chart */
+export function withBase<TType extends string = "line">(
+  opts?: ChartOptions<TType>
+): ChartOptions<TType> {
+  const base: ChartOptions<TType> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    plugins: {
+      legend: { display: false, labels: { color: PP_COLORS.text, boxWidth: 12 } },
+      tooltip: {
+        enabled: true,
+        intersect: false,
+        mode: "index",
+        displayColors: false,
+        borderColor: "rgba(255,255,255,0.12)",
+        borderWidth: 1,
+      },
+    },
+    scales: {
+      x: {
+        grid: { color: PP_COLORS.grid },
+        ticks: { color: PP_COLORS.subtext },
+      } as any,
+      y: {
+        grid: { color: PP_COLORS.grid },
+        ticks: { color: PP_COLORS.subtext },
+      } as any,
+    },
+  };
+  return deepMerge(base, opts || {}) as ChartOptions<TType>;
+}
+
+function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
+  const out: any = Array.isArray(a) ? [...a] : { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      out[k] = deepMerge((a as any)[k] ?? {}, v as any);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export default {
+  applyChartTheme,
+  withBase,
+  PP_COLORS,
+  GOLD, BLUE, GREEN, RED, TEXT, GRID, BG,
+};
+

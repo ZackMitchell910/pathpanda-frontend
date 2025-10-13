@@ -1,27 +1,3 @@
-﻿# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-lock.yaml
-package-lock.json
 
-# Build outputs
-dist/
-.vite/
-.cache/
-coverage/
-
-# Env
 .env
 .env.*
-*.local
-
-# OS/editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Generated assets
-*.png.timestamp
