@@ -21,7 +21,7 @@ import { CardMenu } from "@/components/ui/CardMenu";
 import LogoSimetrix from "@/components/branding/LogoSimetrix";
 import LoadingButton from "./components/ui/LoadingButton";
 import RecentRunsRail from "./components/RecentRunsRail";
-import { Card as UICard } from "@/components/ui/card"; 
+import { Card as UICard } from "@/components/ui/Card"; 
 import SimSummaryCard from "./components/SimSummaryCard";
 import TargetsAndOdds from "./TargetsAndOdds";
 import ListCard from "./ListCard";
@@ -97,28 +97,23 @@ interface RunSummary {
   q50?: number | null;
   probUp?: number | null;
 }
-// ---- Default app key (build/runtime), never a provider key ----
-// If you keep backend auth via X-API-Key, this is an app-level token (e.g., "simetrix-public-demo")
-// Backend maps this to server secrets + enforces rate limits. It's safe to expose.
-const DEFAULT_PT_KEY =
-  (import.meta as any)?.env?.VITE_PT_API_KEY ||
-  (typeof process !== "undefined" ? (process as any)?.env?.NEXT_PUBLIC_PT_API_KEY : "") ||
-  (typeof window !== "undefined" ? (window as any).__PT_API_KEY__ : "") ||
-  "";
+// ---- API base (single source of truth) ----
+declare global {
+  interface Window {
+    __PP_API_BASE__?: string;
+  }
+}
 
-// ---- API base (Vite/Vercel/window override) ----
-const RAW_API_BASE =
-  (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
+const API_BASE = String(
+  (typeof window !== "undefined" && window.__PP_API_BASE__) ||
   (import.meta as any)?.env?.VITE_PT_API_BASE ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
-  (import.meta as any)?.env?.VITE_API_BASE ||
-  (typeof process !== "undefined" ? (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL : "") ||
-  "https://api.simetrix.io";
+  ""
+).replace(/\/+$/, "");
 
-const API_BASE = String(RAW_API_BASE).replace(/\/+$/, "");
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 
-// No query-param key injection anymore (avoid leaks)
+// const res = await fetch(api("/quant/daily/today"), { cache: "no-store" });
+// const data = await res.json();
 
 // Text-first helpers so we can detect HTML 404s and show useful errors
 async function safeText(r: Response) {
