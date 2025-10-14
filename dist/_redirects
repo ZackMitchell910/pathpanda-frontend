@@ -1,0 +1,6 @@
+/simulate/*   https://pathpanda-api.onrender.com/simulate/:splat   200
+/predict      https://pathpanda-api.onrender.com/predict            200
+/train        https://pathpanda-api.onrender.com/train              200
+/outcomes/*   https://pathpanda-api.onrender.com/outcomes/:splat    200
+/learn/*      https://pathpanda-api.onrender.com/learn/:splat       200
+/api/*        https://pathpanda-api.onrender.com/api/:splat         200

@@ -2,26 +2,10 @@ import React from "react";
 import { LineChart, BrainCircuit, BarChart3, Sparkles } from "lucide-react";
 
 const features = [
-  {
-    title: "Autonomous Forecasting Engine",
-    desc: "Automated simulations with cohort tracking and outcome reconciliation.",
-    Icon: LineChart,
-  },
-  {
-    title: "Auto-Labeling & Online Learning",
-    desc: "Dynamic labeling and incremental model updates on incoming data.",
-    Icon: BrainCircuit,
-  },
-  {
-    title: "Explainability & Drivers",
-    desc: "Attribution via factors, regimes, and scenarios.",
-    Icon: BarChart3,
-  },
-  {
-    title: "Daily Quant Signal",
-    desc: "Candidate shortlist, algorithmic ranking, Monte Carlo sim, and concise selection with narrative.",
-    Icon: Sparkles,
-  },
+  { title: "Autonomous Simulation Framework", desc: "Scalable Monte Carlo simulations with cohort analysis and real-time reconciliation." },
+  { title: "Adaptive Learning Engine", desc: "Incremental model refinement via dynamic labeling on streaming data inputs." },
+  { title: "Attribution Analytics", desc: "Factor-based explainability across regimes and probabilistic scenarios." },
+  { title: "Strategic Signal Generation", desc: "Algorithmic candidate selection, ranking, and narrative-driven insights." },
 ];
 
 export default function FeatureTiles() {
@@ -35,9 +19,9 @@ export default function FeatureTiles() {
             className="
               group relative rounded-2xl border border-white/10
               bg-white/[0.04] supports-[backdrop-filter]:bg-white/5 supports-[backdrop-filter]:backdrop-blur
-              hover:bg-white/[0.06] hover:border-amber-300/20
+              hover:bg-white/[0.06] hover:border-blue-300/20
               transition-colors p-5 h-full
-              focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300/35
+              focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-300/35
             "
           >
             {/* Centered stack */}
@@ -45,12 +29,12 @@ export default function FeatureTiles() {
               <span
                 className="
                   inline-flex h-12 w-12 items-center justify-center
-                  rounded-xl bg-amber-400/10 ring-1 ring-amber-400/20
+                  rounded-xl bg-blue-400/10 ring-1 ring-blue-400/20 
                   motion-safe:group-hover:scale-105 transition-transform
                 "
                 aria-hidden
               >
-                <Icon className="h-6 w-6 text-amber-300" />
+                <Icon className="h-6 w-6 text-blue-300" />
               </span>
 
               <h5 className="font-medium leading-tight">{title}</h5>

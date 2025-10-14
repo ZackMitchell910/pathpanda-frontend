@@ -1,79 +1,85 @@
+// ==========================
+// File: src/components/TargetsAndOdds.tsx
+// Palantir-neutral ladder/table; no amber
+// ==========================
 import * as React from "react";
-import ListCard from "./ListCard";
 
-export type TargetRow = {
-  label: string;        // e.g. "-10%", "+20%", "$240"
-  price: number;        // absolute price level
-  hitEver?: number;     // probability (0..1) of intra-horizon touch
-  hitByEnd?: number;    // probability (0..1) of closing >= level by horizon
-  tMedDays?: number;    // median days-to-hit (if hit)
+export type LadderRow = {
+  label: string;           // e.g., "+10%", "Spot"
+  price: number;           // absolute price
+  hitEver?: number;        // 0..1, optional
+  hitByEnd?: number;       // 0..1, optional
+  tMedDays?: number;       // median time-to-hit (days), optional
 };
 
-type Props = {
+export default function TargetsAndOdds({
+  spot,
+  horizonDays,
+  rows,
+}: {
   spot: number;
   horizonDays: number;
-  rows: TargetRow[];
-};
+  rows: LadderRow[];
+}) {
+  const data = Array.isArray(rows) ? rows : [];
 
-const fmtPct = (n?: number) =>
-  Number.isFinite(n as number) ? `${Math.round((n as number) * 100)}%` : "—";
-
-function ProbCell({ p }: { p?: number }) {
-  if (!Number.isFinite(p as number)) return <span className="opacity-70">—</span>;
-  const pc = Math.max(0, Math.min(1, p as number)) * 100;
   return (
-    <div className="relative">
-      <div className="absolute inset-y-0 right-0 left-0 rounded-sm bg-white/5" />
-      <div
-        className="absolute inset-y-0 left-0 rounded-sm bg-white/20"
-        style={{ width: `${pc}%` }}
-      />
-      <span className="relative tabular-nums">{Math.round(pc)}%</span>
-    </div>
-  );
-}
+    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 md:col-span-1">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-semibold">Targets & Odds</div>
+        <div className="text-xs text-white/60">H{Number.isFinite(horizonDays) ? horizonDays : "—"}d</div>
+      </div>
 
-export default function TargetsAndOdds({ spot, horizonDays, rows }: Props) {
-  return (
-    <ListCard
-      title="Targets & Odds"
-      subtitle={
-        <span>
-          Spot <span className="tabular-nums">${spot.toFixed(2)}</span> • Horizon {horizonDays}d
-        </span>
-      }
-      maxHeight={340}
-    >
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-[#0f1216] text-zinc-400">
-          <tr className="[&>th]:py-2 [&>th]:px-4 text-left">
-            <th>Target</th>
-            <th className="text-right">Price</th>
-            <th className="text-right">Hit (ever)</th>
-            <th className="text-right">Hit by end</th>
-            <th className="text-right">Med. days-to-hit</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-800/70">
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-zinc-400">
-                No targets available for this run.
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-white/60">
+            <tr className="text-left">
+              <th className="py-2 pe-3 font-normal">Level</th>
+              <th className="py-2 pe-3 font-normal">Price</th>
+              <th className="py-2 pe-3 font-normal">Hit (ever)</th>
+              <th className="py-2 pe-3 font-normal">Hit by end</th>
+              <th className="py-2 font-normal">Median days</th>
             </tr>
-          ) : (
-            rows.map((r, i) => (
-              <tr key={i} className="[&>td]:py-2 [&>td]:px-4">
-                <td className="text-zinc-200">{r.label}</td>
-                <td className="text-right tabular-nums">${r.price.toFixed(2)}</td>
-                <td className="text-right"><ProbCell p={r.hitEver} /></td>
-                <td className="text-right"><ProbCell p={r.hitByEnd} /></td>
-                <td className="text-right">{Number.isFinite(r.tMedDays as number) ? r.tMedDays : "—"}</td>
+          </thead>
+          <tbody className="divide-y divide-white/10">
+            {data.length === 0 && (
+              <tr>
+                <td colSpan={5} className="py-6 text-white/60">
+                  No target rows. Run a simulation to compute odds or supply rows via props.
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </ListCard>
+            )}
+
+            {data.map((r, i) => (
+              <tr key={i} className="hover:bg-white/5">
+                <td className="py-2 pe-3 text-white/90 whitespace-nowrap">{r.label}</td>
+                <td className="py-2 pe-3 tabular-nums">${Number(r.price).toFixed(2)}</td>
+                <td className="py-2 pe-3 tabular-nums">
+                  {fmtPct(r.hitEver)}
+                </td>
+                <td className="py-2 pe-3 tabular-nums">
+                  {fmtPct(r.hitByEnd)}
+                </td>
+                <td className="py-2 tabular-nums">
+                  {Number.isFinite(r.tMedDays as number) ? `D${Math.round(r.tMedDays as number)}` : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Spot line */}
+      <div className="mt-3 text-[11px] text-white/60">
+        Spot: <span className="font-mono text-white/80">${Number(spot).toFixed(2)}</span>
+      </div>
+    </section>
   );
 }
+
+function fmtPct(v?: number) {
+  if (!Number.isFinite(v as number)) return "—";
+  const x = Math.max(0, Math.min(1, v as number));
+  return `${Math.round(x * 100)}%`;
+}
+

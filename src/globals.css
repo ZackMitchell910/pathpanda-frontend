@@ -1,209 +1,207 @@
-/* globals.css — Tech Noir theme */
-
-/* Tailwind v4 entry */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 @import "tailwindcss";
 
-/* Brand font */
-@import url("https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap");
+/* --------- Theme tokens (match Landing.tsx) --------- */
+:root {
+  --bg: #000000;
+  --fg: #ffffff;
 
-/* ---------- Tech Noir palette (black/white, high-contrast) ---------- */
-:root,
-html.dark,
-html.light {
-  --bg: #000000;          /* pure black */
-  --bg-elev: #0a0a0a;     /* raised layers */
-  --panel: #0d0d0f;       /* cards/panels */
-  --fg: #fafafa;          /* near-white text */
-  --muted: #a1a1aa;       /* zinc-400/500-ish */
-  --border: rgba(255,255,255,0.08);
-  --border-strong: rgba(255,255,255,0.14);
-  --accent: #ffffff;      /* white accents; charts keep their own colors */
-  --focus: rgba(255,255,255,0.20);
+  --muted-70: rgba(255,255,255,0.70);
+  --muted-60: rgba(255,255,255,0.60);
+  --muted-50: rgba(255,255,255,0.50);
+
+  --surface: rgba(255,255,255,0.05);
+  --surface-weak: rgba(255,255,255,0.03);
+
+  --border: rgba(255,255,255,0.10);
+  --border-strong: rgba(255,255,255,0.18);
+
+  /* Amber accent used in Landing glow */
+  --amber-r: 251;  /* amber-400 */
+  --amber-g: 191;
+  --amber-b: 36;
 }
 
-/* System hint */
-html { color-scheme: dark; scroll-behavior: smooth; }
-
-/* Kill sideways scroll globally */
-html, body { overflow-x: hidden; }
-
-/* Base */
-*,
-*::before,
-*::after { box-sizing: border-box; }
-body {
+/* Dark base everywhere */
+html, body, #root {
+  height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: 'Oswald', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color-scheme: dark;
+}
+
+/* Selection matches the hero accent */
+::selection {
+  background: rgba(var(--amber-r), var(--amber-g), var(--amber-b), 0.35);
+  color: #000;
+}
+
+/* Links: remove underline globally (Landing behavior) */
+a, a:hover, a:focus, a:active {
+  text-decoration: none !important;
+}
+
+/* Smooth fonts */
+body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Links = white with subtle underline on hover (no color) */
-a {
-  color: var(--fg);
-  text-decoration: none;
-}
-a:hover { text-decoration: underline; text-underline-offset: 3px; }
-
-/* Headings: confident, tight tracking */
-h1,h2,h3,h4 { letter-spacing: 0.01em; }
-
-/* Cards / panels */
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 16px;
+/* --------- Shared surfaces & borders (plain CSS) --------- */
+.card-surface {
+  border-radius: 1rem;               /* ~ rounded-2xl */
+  border: 1px solid var(--border);   /* border-white/10 */
+  background: var(--surface);        /* bg-white/5 */
 }
 
-/* Borders & subtle separators */
-.hr,
-hr {
-  border: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--border), transparent);
+.section-divider {
+  border-top: 1px solid var(--border);
 }
 
-/* Inputs (monochrome) */
-input, select, textarea {
-  background: var(--bg-elev);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-input:focus, select:focus, textarea:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
-  border-color: var(--border-strong);
-}
+.text-muted-70 { color: var(--muted-70); }
+.text-muted-60 { color: var(--muted-60); }
+.text-muted-50 { color: var(--muted-50); }
 
-/* Buttons (monochrome default) */
-button {
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-button:hover { background: rgba(255,255,255,0.04); }
-button:active { transform: translateY(1px); }
+.border-default { border-color: var(--border); }
+.border-strong  { border-color: var(--border-strong); }
 
-/* Tables */
-table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid var(--border); padding: 10px 8px; }
-th { color: var(--muted); font-weight: 500; }
-
-/* Selections */
-::selection { background: rgba(255,255,255,0.14); color: #fff; }
-
-/* Sticky headers compensate for jump anchors */
-section[id], [id^="section-"] { scroll-margin-top: 72px; }
-
-/* Media should never push layout horizontally */
-img, canvas, svg, video { max-width: 100%; height: auto; display: block; }
-
-/* HIDE ANY THEME TOGGLE CONTROLS (disable light mode) */
-.mode-toggle,
-.theme-toggle,
-[data-theme-toggle],
-[aria-label="Toggle theme"],
-[aria-label="Theme"],
-[aria-label="Color mode"] {
-  display: none !important;
-}
-
-/* Utility: container widths */
-.container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
-
-/* Marketing surfaces */
+/* Navbar / Footer shells to match landing spacing */
 .navbar {
-  backdrop-filter: blur(8px);
-  background: rgba(0,0,0,0.6);
+  background: rgba(0,0,0,0.60);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--border);
 }
 .footer {
   border-top: 1px solid var(--border);
-  color: #cfcfd2;
+  color: var(--muted-60);
+  background: var(--bg);
 }
 
-/* --- Landing: single vertical scroller (fix double scrollbars) --- */
-html { overflow-y: auto; }                  /* viewport scrolls */
-body, #root { overflow-y: visible !important; height: auto !important; }
-
-/* Make sure the landing page never creates its own scroll context */
-.landing-shell,
-.landing-shell > div,
-.landing-shell > section {
-  overflow-y: visible !important;
-  max-height: none !important;
+/* Reusable amber aura hover (mirrors Landing buttons/nav hover) */
+.hover-aura-amber {
+  position: relative;
+  transition: color .2s ease, transform .2s ease;
+}
+.hover-aura-amber::before {
+  content: "";
+  position: absolute;
+  inset: -0.5rem;
+  border-radius: 0.75rem;
+  background: radial-gradient(
+    120px 120px at 50% 50%,
+    rgba(var(--amber-r), var(--amber-g), var(--amber-b), 0.18),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity .25s ease;
+  pointer-events: none;
+  z-index: -1;
+}
+.hover-aura-amber:hover::before,
+.hover-aura-amber:focus-visible::before {
+  opacity: 1;
 }
 
-/* In case any component accidentally sets full-viewport heights */
-.landing-shell [class*="h-screen"],
-.landing-shell [class*="min-h-screen"],
-.landing-shell [style*="height: 100vh"] {
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
+/* Outline / solid button feel for any raw <button> outside shadcn */
+.btn-outline {
+  border-radius: 0.75rem; /* ~ rounded-xl */
+  padding: 0.75rem 1.25rem; /* px-5 py-3 */
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  transition: background .2s ease, border-color .2s ease;
+}
+.btn-outline:hover,
+.btn-outline:focus-visible {
+  background: rgba(255,255,255,0.10);
+  border-color: var(--border-strong);
+}
+.btn-solid {
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.25rem; /* Landing uses bigger py */
+  color: #000;
+  background: #fff;
+  border: 1px solid transparent;
+  transition: background .2s ease;
+}
+.btn-solid:hover,
+.btn-solid:focus-visible {
+  background: rgba(255,255,255,0.90);
 }
 
-/* Mobile menu safety: avoid off-screen scroll contexts when closed */
-.landing-shell nav[aria-expanded="false"] { overflow: visible !important; }
-
-/* Keep things tidy */
-.landing-shell canvas,
-.landing-shell svg {
-  display: block;
-  max-width: 100%;
-  overflow: visible;
+/* Optional utility container to mirror Landing widths quickly */
+.container-hero {
+  max-width: 80rem; /* ~ max-w-7xl */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.5rem;   /* px-6 */
+  padding-right: 1.5rem;
 }
-/* ---- Single scroller on Landing: BODY scrolls, HTML does not ---- */
-.landing-html {
-  height: 100% !important;
-  overflow: hidden !important;  /* Suppress HTML scrollbar entirely */
+@media (min-width: 768px) {
+  .container-hero { padding-left: 2rem; padding-right: 2rem; } /* md:px-8 */
 }
 
-.landing-body {
-  height: 100% !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;  /* Reinforce horizontal fix */
+/* --------- Optional overlays to echo Landing bg effects --------- */
+.grid-overlay {
+  position: relative;
+}
+.grid-overlay::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.15) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(ellipse at top, black 0%, transparent 70%);
+  mask-image: radial-gradient(ellipse at top, black 0%, transparent 70%);
 }
 
-.landing-body #root,
-.landing-body .landing-shell {
-  height: 100% !important;
-  overflow-y: visible !important;
-  overflow-x: hidden !important;
+.noise-overlay {
+  position: relative;
+}
+.noise-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23n)" opacity="0.35"/></svg>');
 }
 
-/* Safety: Prevent accidental viewport-fixed heights from creating nested scrollers */
-.landing-body [class*="h-screen"],
-.landing-body [class*="min-h-screen"],
-.landing-body [style*="height: 100vh"] {
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  overflow: visible !important;
+.glow-amber {
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  left: -6rem;
+  top: -6rem;
+  pointer-events: none;
+  filter: blur(36px);
+  background: radial-gradient(
+    closest-side,
+    rgba(var(--amber-r), var(--amber-g), var(--amber-b), 0.10),
+    transparent 70%
+  );
 }
 
-/* Ensure media elements do not overflow horizontally */
-.landing-body canvas,
-.landing-body svg,
-.landing-body img,
-.landing-body video {
-  max-width: 100%;
-  height: auto;
-  overflow: hidden;
+/* --------- Scrollbar (subtle, dark) --------- */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.25) transparent; }
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,0.25);
+  border-radius: 8px;
+  border: 2px solid transparent;
 }
-.integrations a,
-.integrations a:hover,
-.integrations a:focus {
-  text-decoration: none !important;
-}
-.navbar a { text-decoration: none !important; }
-/* Thin scroll helper */
-.thin-scroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
-.thin-scroll::-webkit-scrollbar { width: 8px; }
-.thin-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 9999px; }
-.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* --------- Typography helpers (works even without typography plugin) --------- */
+.prose { color: var(--muted-70); }
+.prose :where(h1,h2,h3,h4) { color: var(--fg); }
+.prose :where(p, li, blockquote) { color: var(--muted-70); }
+.prose-invert { color: var(--muted-70); }

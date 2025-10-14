@@ -1,126 +1,81 @@
-// src/components/marketing/IntegrationsRow.tsx
+// src/marketing/IntegrationsRow.tsx
 import React from "react";
 import {
-  SiPolygon,
-  SiRedis,
-  SiDuckdb,
-  SiTensorflow,
-  SiFastapi,
-  SiReact,
-  SiPandas,
-  SiPytorch,
-  SiChartdotjs,
-  SiVercel,
-  SiNumpy,
-  SiQiskit,
+  SiPolygon, SiRedis, SiDuckdb, SiFastapi, SiVercel,
+  SiNumpy, SiPandas, SiPytorch, SiTensorflow, SiChartdotjs, SiQiskit,
+  SiReact, SiPrometheus,
 } from "react-icons/si";
-
-// Custom xAI Icon (assuming imported SVG for precision; adjust path accordingly)
-import XaiLogo from '@/assets/xai-logo.svg';
-
-const XaiIcon: React.FC<{ size?: number; className?: string }> = ({ size = 20, className }) => (
-  <img src={XaiLogo} alt="xAI" width={size} height={size} className={className} />
-);
 
 type Item = {
   name: string;
-  Icon: React.ComponentType<{ size?: number; className?: string }>;
   href: string;
+  Icon?: React.ComponentType<{ className?: string }>;
+  logoSrc?: string; // for local logos if needed
 };
-
 type Group = { title: string; items: Item[] };
 
-const groups: Group[] = [
-  {
-    title: "Data & Infrastructure",
-    items: [
-      { name: "Polygon.io", Icon: SiPolygon, href: "https://polygon.io" },
-      { name: "Vercel", Icon: SiVercel, href: "https://vercel.com" },
-    ],
-  },
-  {
-    title: "Storage Engines",
-    items: [
-      { name: "DuckDB", Icon: SiDuckdb, href: "https://duckdb.org" },
-      { name: "Redis", Icon: SiRedis, href: "https://redis.io" },
-    ],
-  },
-  {
-    title: "Numerics & AI",
-    items: [
-      { name: "NumPy", Icon: SiNumpy, href: "https://numpy.org" },
-      { name: "Pandas", Icon: SiPandas, href: "https://pandas.pydata.org" },
-      { name: "PyTorch", Icon: SiPytorch, href: "https://pytorch.org" },
-      { name: "TensorFlow", Icon: SiTensorflow, href: "https://www.tensorflow.org" },
-      { name: "xAI", Icon: XaiIcon, href: "https://x.ai" },
-    ],
-  },
-  {
-    title: "API & Frontend",
-    items: [
-      { name: "FastAPI", Icon: SiFastapi, href: "https://fastapi.tiangolo.com" },
-      { name: "React", Icon: SiReact, href: "https://react.dev" },
-      { name: "Chart.js", Icon: SiChartdotjs, href: "https://www.chartjs.org" },
-    ],
-  },
-  {
-    title: "Quantum Tools",
-    items: [
-      { name: "Qiskit", Icon: SiQiskit, href: "https://qiskit.org" },
-      { name: "IBM Quantum Runtime", Icon: SiQiskit, href: "https://quantum-computing.ibm.com" },
-    ],
-  },
-
-];
-
-function ItemChip({ item }: { item: Item }) {
-  const { name, Icon, href } = item;
+function Chip({ item }: { item: Item }) {
+  const { name, href, Icon, logoSrc } = item;
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
-      aria-label={`${name} integration`}
-      title={name}
-      className={[
-        "group relative inline-flex items-center gap-2 rounded-full border px-4 py-2.5",
-        "border-white/5 bg-white/3 backdrop-blur-sm",
-        "transition-all duration-300 ease-in-out",
-        "no-underline hover:no-underline focus:no-underline",
-        "hover:bg-amber-400/5 hover:border-amber-400/30 hover:scale-105",
-        "hover:shadow-[0_0_15px_rgba(251,191,36,0.15)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50",
-      ].join(" ")}
+      className="relative rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 hover:text-white
+                 transition inline-flex items-center gap-2"
     >
-      <Icon aria-hidden size={20} className="text-white/60 group-hover:text-amber-300 flex-shrink-0 transition-colors" />
-      <span className="text-sm font-medium text-white/70 group-hover:text-amber-200 truncate max-w-[160px]">
-        {name}
-      </span>
+      {/* white glow hover */}
+      <span
+        className="pointer-events-none absolute -inset-2 -z-10 opacity-0 hover:opacity-100 rounded-2xl transition"
+        style={{ background: "radial-gradient(120px 120px at 50% 50%, rgba(255,255,255,0.22), transparent 60%)" }}
+      />
+      {Icon ? <Icon className="h-4 w-4" /> : logoSrc ? <img src={logoSrc} alt={name} className="h-4 w-4 object-contain" /> : null}
+      <span>{name}</span>
     </a>
   );
 }
 
 export default function IntegrationsRow() {
+  const groups: Group[] = [
+    {
+      title: "Market Data & Infra",
+      items: [
+        { name: "Polygon.io", href: "https://polygon.io", Icon: SiPolygon },
+        { name: "Redis", href: "https://redis.io", Icon: SiRedis },
+        { name: "DuckDB", href: "https://duckdb.org", Icon: SiDuckdb },
+        { name: "FastAPI", href: "https://fastapi.tiangolo.com", Icon: SiFastapi },
+        { name: "Vercel", href: "https://vercel.com", Icon: SiVercel },
+        { name: "Prometheus Client", href: "https://prometheus.io/docs/instrumenting/clientlibs/", Icon: SiPrometheus },
+      ],
+    },
+    {
+      title: "ML & Quant",
+      items: [
+        { name: "NumPy", href: "https://numpy.org", Icon: SiNumpy },
+        { name: "Pandas", href: "https://pandas.pydata.org", Icon: SiPandas },
+        { name: "PyTorch", href: "https://pytorch.org", Icon: SiPytorch },
+        { name: "TensorFlow", href: "https://tensorflow.org", Icon: SiTensorflow },
+        { name: "Chart.js", href: "https://www.chartjs.org", Icon: SiChartdotjs },
+        { name: "Qiskit", href: "https://qiskit.org", Icon: SiQiskit },
+      ],
+    },
+    {
+      title: "Frontend",
+      items: [{ name: "React", href: "https://react.dev", Icon: SiReact }],
+    },
+  ];
+
   return (
-    <section className="integrations max-w-7xl mx-auto px-6 py-20 border-t border-white/5">
-      <h4 className="text-center text-xs tracking-[0.25em] text-white/50 mb-10 font-semibold uppercase">
-        EMPOWERED BY PREMIER TECHNOLOGIES
-      </h4>
-      <div className="flex flex-wrap justify-center gap-8 lg:gap-10">
-        {groups.map((g) => (
-          <div 
-            key={g.title} 
-            className="flex flex-col items-center w-full sm:w-auto min-w-[280px] max-w-sm rounded-xl bg-white/2 backdrop-blur-md p-6 shadow-[0_4px_20px_rgba(0,0,0,0.3)] transition-all duration-300 hover:shadow-[0_6px_25px_rgba(251,191,36,0.1)]"
-          >
-            <div className="mb-5 text-sm font-semibold text-white/60 uppercase tracking-wider text-center">{g.title}</div>
-            <div className="flex flex-wrap gap-3 justify-center">
-              {g.items.map((it) => (
-                <ItemChip key={it.name} item={it} />
-              ))}
-            </div>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {groups.map((g) => (
+        <div key={g.title} className="space-y-4">
+          <h3 className="text-white/70 text-sm uppercase tracking-wide">{g.title}</h3>
+          {/* flowing, responsive chips */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {g.items.map((it) => <Chip key={it.name} item={it} />)}
           </div>
-        ))}
-      </div>
-    </section>
+        </div>
+      ))}
+    </div>
   );
 }

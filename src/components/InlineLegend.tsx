@@ -1,17 +1,28 @@
+
+// ==========================
+// File: src/components/InlineLegend.tsx
+// ==========================
 "use client";
 import React from "react";
 
 type LegendItem = { label: string; swatch: string; dashed?: boolean };
 
 export const InlineLegend: React.FC<{ items?: LegendItem[] }> = ({ items }) => {
-  const safe: LegendItem[] =
-    Array.isArray(items) && items.length
-      ? items
-      : [
-          { label: "Median", swatch: "#60A5FA" },
-          { label: "80% band", swatch: "linear-gradient(90deg, rgba(52,211,153,0.25), rgba(52,211,153,0.05))" },
-          { label: "95% band", swatch: "linear-gradient(90deg, rgba(125,211,252,0.25), rgba(125,211,252,0.05))" },
-        ];
+  const safe: LegendItem[] = Array.isArray(items) && items.length
+    ? items
+    : [
+        { label: "Median", swatch: "#F3F4F6" }, // neutral light
+        {
+          label: "80% band",
+          swatch:
+            "linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08))",
+        },
+        {
+          label: "95% band",
+          swatch:
+            "linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06))",
+        },
+      ];
 
   return (
     <div className="flex flex-wrap items-center gap-4 text-xs">
@@ -25,7 +36,7 @@ export const InlineLegend: React.FC<{ items?: LegendItem[] }> = ({ items }) => {
             }}
             aria-hidden
           />
-          <span className="opacity-80">{it.label}</span>
+          <span className="text-white/80">{it.label}</span>
         </div>
       ))}
     </div>

@@ -9,6 +9,7 @@ import "@/debug/hookGlobalErrors";
 import "./globals.css";
 import { inject } from '@vercel/analytics';
 import "chart.js/auto";
+import HowItWorksPage from "./HowItWorks";
 
 if (import.meta.env.PROD) {
   inject();
@@ -25,8 +26,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<App />} />
-        <Route path="/docs" element={<DocsPage />} />  {/* ← add */}
+        <Route path="/docs" element={<DocsPage />} />  
         <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/how-it-works" element={<HowItWorksPage />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

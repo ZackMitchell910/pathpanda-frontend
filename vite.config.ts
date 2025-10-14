@@ -1,20 +1,16 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "path";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import path from 'path';  // Import Node's path module for resolution
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      '@': path.resolve(__dirname, './src'),  // Maps '@' to the 'src' directory
     },
-  },
-  build: {
-    chunkSizeWarningLimit: 1000, // Increase to 1000 kB (or higher as needed)
-    sourcemap: true,
-  },
-  // (Optional) If some third-party code expects `process.env` in the browser:
-  define: {
-    "process.env": {},
   },
 });

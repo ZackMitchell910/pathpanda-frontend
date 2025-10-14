@@ -1,3 +1,6 @@
+// ==========================
+// File: src/components/SummaryCard.tsx
+// ==========================
 import * as React from "react";
 
 type EOD = { day_index: number; median: number; mean: number; p05: number; p95: number };
@@ -10,6 +13,9 @@ type Props = {
   progress?: number;           // 0..100
   currentPrice?: number;
   eod?: EOD | null;
+  /** New-style props from refactored App.tsx */
+  probUpLabel?: string;        // e.g., "58.0%"
+  probUpColor?: string;        // e.g., "text-emerald-400"
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -41,11 +47,11 @@ function ProbRow({ label, value }: { label: string; value?: number | null }) {
 }
 
 function sentimentClass(v?: number | null) {
-  if (!Number.isFinite(v as number)) return "text-zinc-300";
+  if (!Number.isFinite(v as number)) return "text-white/70"; // neutral
   const x = v as number;
-  if (x > 0.51) return "text-[#34D399]"; // green-ish
-  if (x < 0.49) return "text-[#F87171]"; // red-ish
-  return "text-[#FBBF24]";               // amber-ish
+  if (x > 0.51) return "text-emerald-400"; // green-ish
+  if (x < 0.49) return "text-rose-400";    // red-ish
+  return "text-white/70";                    // neutral (no amber)
 }
 function sentimentLabel(v?: number | null) {
   if (!Number.isFinite(v as number)) return "—";
@@ -61,6 +67,8 @@ export function SummaryCard({
   progress = 0,
   currentPrice,
   eod,
+  probUpLabel,
+  probUpColor,
 }: Props) {
   return (
     <div className="text-sm">
@@ -75,13 +83,25 @@ export function SummaryCard({
         </div>
       </div>
 
-      {/* Probabilities */}
-      {Number.isFinite(probUpNext as number) && (
-        <ProbRow label="Prob up next" value={probUpNext as number} />
+      {/* Topline Prob (new-style) */}
+      {probUpLabel && (
+        <div className="flex items-baseline gap-2 mb-2">
+          <div className={`text-xl font-semibold ${probUpColor || "text-white"}`}>{probUpLabel}</div>
+          <div className="text-xs text-white/60">P(up) by horizon</div>
+        </div>
       )}
-      <div className="mt-1">
-        <ProbRow label="Prob up by horizon" value={probUpEnd as number} />
-      </div>
+
+      {/* Probabilities (legacy numeric style) */}
+      {!probUpLabel && (
+        <>
+          {Number.isFinite(probUpNext as number) && (
+            <ProbRow label="Prob up next" value={probUpNext as number} />
+          )}
+          <div className="mt-1">
+            <ProbRow label="Prob up by horizon" value={probUpEnd as number} />
+          </div>
+        </>
+      )}
 
       {/* Sentiment badge (based on horizon) */}
       <div className={`mt-2 text-xs ${sentimentClass(probUpEnd)}`}>
@@ -121,3 +141,4 @@ export function SummaryCard({
     </div>
   );
 }
+
