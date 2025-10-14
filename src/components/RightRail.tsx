@@ -38,7 +38,9 @@ export default function RightRail({
               </li>
             ))}
             {recent.length === 0 && (
-              <li className="text-xs text-white/60 px-4 py-2">No runs yet — run a simulation to see history here.</li>
+              <li className="px-4 py-2 text-xs text-white/60">
+                No runs yet - run a simulation to see history here.
+              </li>
             )}
           </ul>
         </div>

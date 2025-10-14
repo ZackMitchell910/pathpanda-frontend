@@ -6,6 +6,8 @@
 // =============================================
 import { Chart } from "chart.js/auto";
 
+export const GOLD = "rgba(203,161,53,1)";
+
 let __applied = false;
 export function applyChartTheme() {
   if (__applied) return; // idempotent

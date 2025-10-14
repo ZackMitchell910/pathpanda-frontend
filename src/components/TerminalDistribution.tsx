@@ -3,7 +3,8 @@
 // Neutral histogram for terminal prices (no amber)
 // =============================================
 import React, { useEffect, useMemo, useRef } from "react";
-import { Chart, ChartOptions } from "chart.js/auto";
+import { Chart } from "chart.js/auto";
+import type { ChartOptions } from "chart.js";
 
 export default function TerminalDistribution({ prices }: { prices: number[] }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

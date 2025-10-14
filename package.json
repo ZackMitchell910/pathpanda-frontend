@@ -1,5 +1,5 @@
 {
-  "name": "predictivetwin",
+  "name": "simetrix",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --strictPort --port 5174",
-    "typecheck": "tsc -b --pretty",
-    "engines": {
-      "node": ">=18"
-    }
+    "typecheck": "tsc -b --pretty"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
@@ -41,14 +41,14 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
-    "tailwindcss": "^4.0.0",
-    "@tailwindcss/vite": "^4.0.0",
+    "@tailwindcss/postcss": "^4.1.14",
+    "@tailwindcss/vite": "^4.1.14",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.18",
+    "tailwindcss": "^4.1.14",
     "typescript": "^5.5.4",
     "vite": "^5.4.8",
     "vite-plugin-svgr": "^4.5.0"

@@ -14,11 +14,13 @@ type NewsItem = {
 type UseNewsArgs = {
   symbol: string;
   includeNews: boolean;
-  apiKey: string;           // PT_API_KEY for your backend
-  limit?: number;           // default 6
-  days?: number;            // default 7
+  apiKey?: string;
+  apiBase?: string;
+  getHeaders?: () => Record<string, string> | null | undefined;
+  limit?: number;
+  days?: number;
   onLog?: (m: string) => void;
-  retry?: number;           // default 0
+  retry?: number;
 };
 
 const RAW_API_BASE =
@@ -29,12 +31,13 @@ const RAW_API_BASE =
   "https://pathpanda-api.onrender.com";
 
 const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
-const api = (p: string) => `${API_BASE}${p}`;
 
 export function useNews({
   symbol,
   includeNews,
   apiKey,
+  apiBase,
+  getHeaders,
   limit = 6,
   days = 7,
   onLog,
@@ -47,16 +50,17 @@ export function useNews({
   const tried = useRef(0);
   const sym = (symbol || "").trim().toUpperCase();
 
-  const canFetch = includeNews && !!apiKey && !!sym;
-
-  const headers = useMemo(
-    () => ({
-      "Content-Type": "application/json",
-      "X-API-Key": apiKey,
-      Accept: "application/json",
-    }),
-    [apiKey]
+  const resolvedBase = useMemo(() => {
+    const candidate = (apiBase || "").trim();
+    const base = candidate.length ? candidate : API_BASE;
+    return base.replace(/\/+$/, "");
+  }, [apiBase]);
+  const api = useCallback(
+    (p: string) => `${resolvedBase}${p.startsWith("/") ? "" : "/"}${p}`,
+    [resolvedBase]
   );
+
+  const canFetch = includeNews && !!sym;
 
   const fetchPage = useCallback(
     async (cursor?: string | null) => {
@@ -68,6 +72,31 @@ export function useNews({
         u.searchParams.set("limit", String(limit));
         u.searchParams.set("days", String(days));
         if (cursor) u.searchParams.set("cursor", cursor);
+
+        let headers: Record<string, string> = { Accept: "application/json" };
+        try {
+          const custom = typeof getHeaders === "function" ? getHeaders() : null;
+          if (custom && typeof custom === "object") {
+            headers = { ...headers, ...custom };
+          } else if (apiKey) {
+            headers = {
+              ...headers,
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+            };
+          } else {
+            headers = { ...headers, "Content-Type": "application/json" };
+          }
+        } catch (headerErr: any) {
+          onLog?.(`News headers error: ${headerErr?.message || headerErr}`);
+          if (apiKey) {
+            headers = {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+            };
+          }
+        }
 
         const r = await fetch(u.toString(), { headers });
         const txt = await r.text().catch(() => "");
@@ -97,7 +126,7 @@ export function useNews({
         setLoading(false);
       }
     },
-    [canFetch, days, fetch, headers, limit, onLog, retry, sym]
+    [api, apiKey, canFetch, days, getHeaders, limit, onLog, retry, sym]
   );
 
   // initial load when inputs change

@@ -27,7 +27,7 @@ export default function TargetsAndOdds({
     <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 md:col-span-1">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold">Targets & Odds</div>
-        <div className="text-xs text-white/60">H{Number.isFinite(horizonDays) ? horizonDays : "—"}d</div>
+        <div className="text-xs text-white/60">H{Number.isFinite(horizonDays) ? horizonDays : "-"}d</div>
       </div>
 
       <div className="overflow-x-auto">
@@ -61,7 +61,7 @@ export default function TargetsAndOdds({
                   {fmtPct(r.hitByEnd)}
                 </td>
                 <td className="py-2 tabular-nums">
-                  {Number.isFinite(r.tMedDays as number) ? `D${Math.round(r.tMedDays as number)}` : "—"}
+                  {Number.isFinite(r.tMedDays as number) ? `D${Math.round(r.tMedDays as number)}` : "-"}
                 </td>
               </tr>
             ))}
@@ -78,7 +78,7 @@ export default function TargetsAndOdds({
 }
 
 function fmtPct(v?: number) {
-  if (!Number.isFinite(v as number)) return "—";
+  if (!Number.isFinite(v as number)) return "-";
   const x = Math.max(0, Math.min(1, v as number));
   return `${Math.round(x * 100)}%`;
 }
