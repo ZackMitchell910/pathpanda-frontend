@@ -1,29 +1,16 @@
-"use client";
-
-import React from "react";
-import { Line } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  LineController,
-  LineElement,
-  PointElement,
-  LinearScale,
-  CategoryScale,
-  Tooltip,
-  Filler,
-  type ChartOptions,
-} from "chart.js";
-import { getRelativePosition } from "chart.js/helpers";
-import { GOLD } from "@/theme/chartTheme";
-
-ChartJS.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler);
+// =============================================
+// File: src/components/FanChart.tsx
+// Palantir-neutral fan chart (no amber; grayscale bands)
+// =============================================
+import React, { useEffect, useMemo, useRef } from "react";
+import Chart from "chart.js/auto";
+import type { Chart as ChartJS, ChartOptions, Plugin } from "chart.js";
 
 type MCArtifact = {
   symbol: string;
   horizon_days: number;
-  median_path: [number, number][];
+  median_path: [number, number][]; // [dayIndex, price]
   bands: {
-    p50: [number, number][];
     p80_low: [number, number][];
     p80_high: [number, number][];
     p95_low: [number, number][];
@@ -31,167 +18,155 @@ type MCArtifact = {
   };
 };
 
-const GOLD_GLOW = "rgba(203,161,53,0.28)"; // soft halo
-const BAND80 = "rgba(203,161,53,0.12)";     // gold-tinted action band
-const BAND95 = "rgba(255,255,255,0.07)";    // neutral uncertainty
+const GRID = "rgba(255,255,255,0.08)";
+const AXIS = "rgba(255,255,255,0.38)";
+const P95 = "rgba(255,255,255,0.07)"; // widest band
+const P80 = "rgba(255,255,255,0.15)"; // inner band
+const MEDIAN = "#E5E7EB"; // soft white
 
-type FanProps = { data?: MCArtifact; artifact?: MCArtifact };
+export default function FanChart({ artifact }: { artifact: MCArtifact }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartRef = useRef<ChartJS | null>(null);
 
-export default function FanChart({ data, artifact }: FanProps) {
-  const a = (data ?? artifact) as MCArtifact | undefined;
-  if (!a || !Array.isArray(a.median_path) || !a.median_path.length || !a.bands) {
-    return <div className="text-xs opacity-70">Run a simulation to view.</div>;
-  }
+  const dataSeries = useMemo(() => {
+    const xs = artifact.median_path.map(([d]) => d);
+    const median = artifact.median_path.map(([, y]) => y);
+    const p80L = artifact.bands.p80_low.map(([, y]) => y);
+    const p80H = artifact.bands.p80_high.map(([, y]) => y);
+    const p95L = artifact.bands.p95_low.map(([, y]) => y);
+    const p95H = artifact.bands.p95_high.map(([, y]) => y);
+    return { xs, median, p80L, p80H, p95L, p95H };
+  }, [artifact]);
 
-  const { symbol, horizon_days, median_path, bands } = a;
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
 
-  const labels = median_path.map(([i]) => `D${i}`);
-  const yMedian = median_path.map(([, v]) => v);
-  const y80Low = bands.p80_low.map(([, v]) => v);
-  const y80High = bands.p80_high.map(([, v]) => v);
-  const y95Low = bands.p95_low.map(([, v]) => v);
-  const y95High = bands.p95_high.map(([, v]) => v);
+    // Clean up previous
+    if (chartRef.current) {
+      chartRef.current.destroy();
+      chartRef.current = null;
+    }
 
-  const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
-  const [hoverBand, setHoverBand] = React.useState<"p80" | "p95" | null>(null);
-  const chartRef = React.useRef<ChartJS<"line"> | null>(null);
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+    // Custom plugin to paint fan bands under the line using direct canvas
+    const fanBands: Plugin = {
+      id: "fanBands",
+      beforeDatasetsDraw(c) {
+        const { chartArea, ctx } = c;
+        const { top, bottom, left, right } = chartArea;
+        const xScale: any = c.scales.x;
+        const yScale: any = c.scales.y;
+        if (!xScale || !yScale) return;
 
-  // Datasets: back-to-front fill order. Duplicate median for glow.
-  const chartData = {
-    labels,
-    datasets: [
-      {
-        label: "95% band",
-        data: y95High,
-        borderWidth: 0,
-        backgroundColor: BAND95,
-        fill: { target: 2, above: BAND95, below: BAND95 },
-        pointRadius: 0,
+        const { xs, p95L, p95H, p80L, p80H } = dataSeries;
+        if (!xs.length) return;
+
+        // helper to trace band path between low and high arrays
+        function drawBand(low: number[], high: number[], fillStyle: string) {
+          ctx.save();
+          ctx.beginPath();
+          // upper (left -> right)
+          xs.forEach((x, i) => {
+            const px = xScale.getPixelForValue(x);
+            const py = yScale.getPixelForValue(high[i]);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          // lower (right -> left)
+          for (let i = xs.length - 1; i >= 0; i--) {
+            const px = xScale.getPixelForValue(xs[i]);
+            const py = yScale.getPixelForValue(low[i]);
+            ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fillStyle = fillStyle;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // 95% (outer) then 80% (inner) so inner sits above
+        drawBand(p95L, p95H, P95);
+        drawBand(p80L, p80H, P80);
+
+        // soft vertical rule on hover index (using tooltip active point)
+        const active = c.getActiveElements?.()[0];
+        if (active) {
+          const x = c.scales.x.getPixelForValue(active.index);
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,255,255,0.25)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, top);
+          ctx.lineTo(x, bottom);
+          ctx.stroke();
+          ctx.restore();
+        }
       },
-      {
-        label: "80% band",
-        data: y80High,
-        borderWidth: 0,
-        backgroundColor: BAND80,
-        fill: { target: 3, above: BAND80, below: BAND80 },
-        pointRadius: 0,
+    };
+
+    Chart.register(fanBands);
+
+    const options: ChartOptions<any> = {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          ticks: { color: AXIS, autoSkip: true, maxTicksLimit: 8 },
+          grid: { color: GRID },
+        },
+        y: {
+          ticks: { color: AXIS },
+          grid: { color: GRID },
+        },
       },
-      { label: "_95_low", data: y95Low, borderWidth: 0, pointRadius: 0 },
-      { label: "_80_low", data: y80Low, borderWidth: 0, pointRadius: 0 },
-
-      // Gold glow (thick, translucent)
-      {
-        label: "MedianGlow",
-        data: yMedian,
-        borderColor: GOLD_GLOW,
-        borderWidth: 6,
-        pointRadius: 0,
-        tension: 0.16,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: "index",
+          intersect: false,
+          backgroundColor: "rgba(17,17,17,0.95)",
+          titleColor: "#fff",
+          bodyColor: "#e5e7eb",
+          borderColor: "rgba(255,255,255,0.12)",
+          borderWidth: 1,
+          callbacks: {
+            title: (items) => `Day ${items?.[0]?.parsed?.x ?? ""}`,
+            label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed?.(2)}`,
+          },
+        },
       },
-      // Crisp gold median
-      {
-        label: "Median",
-        data: yMedian,
-        borderColor: GOLD,
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.16,
+      elements: { line: { tension: 0.2 } },
+    };
+
+    const xs = dataSeries.xs;
+    const chart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: xs,
+        datasets: [
+          {
+            label: "Median",
+            data: dataSeries.median,
+            borderColor: MEDIAN,
+            backgroundColor: MEDIAN,
+            borderWidth: 2,
+            pointRadius: 0,
+          },
+        ],
       },
-    ],
-  };
+      options,
+    });
 
-  const options: ChartOptions<"line"> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: "index", intersect: false },
-    plugins: { legend: { display: false }, tooltip: { enabled: true } },
-    scales: {
-      x: {
-        grid: { display: false },
-        ticks: { maxRotation: 0 },
-        title: { display: true, text: "Days", color: "#C7C9D1" },
-      },
-      y: { title: { display: true, text: "Price", color: "#C7C9D1" } },
-    },
-    // @ts-ignore
-    onHover: (e, _els, chart) => {
-      const scales: any = (chart as any).scales;
-      const x = scales?.x, y = scales?.y;
-      if (!x || !y) return;
-      const pos = getRelativePosition((e as any).native ?? e, chart as any);
-      const xVal = x.getValueForPixel(pos.x);
-      const yVal = y.getValueForPixel(pos.y);
-      if (xVal == null || yVal == null || !Number.isFinite(xVal) || !Number.isFinite(yVal)) {
-        setHoverIdx(null); setHoverBand(null); return;
-      }
-      const idx = clamp(Math.round(Number(xVal)), 0, labels.length - 1);
-      const y80L = y80Low[idx], y80H = y80High[idx], y95L = y95Low[idx], y95H = y95High[idx];
+    chartRef.current = chart;
 
-      let band: "p80" | "p95" | null = null;
-      if (y80L != null && y80H != null && yVal >= y80L && yVal <= y80H) band = "p80";
-      else if (y95L != null && y95H != null && yVal >= y95L && yVal <= y95H) band = "p95";
+    return () => {
+      chart.destroy();
+      chartRef.current = null;
+      Chart.unregister(fanBands);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifact, dataSeries.xs.join("," )]);
 
-      setHoverIdx(idx); setHoverBand(band);
-      const canvas = (chart as any).canvas as HTMLCanvasElement;
-      if (canvas) canvas.style.cursor = "crosshair";
-    },
-  };
-
-  // Overlay crosshair + band tag (gold outline when on 80%)
-  const hoverPlugin = {
-    id: "fanHoverOverlay",
-    afterDraw: (chart: any) => {
-      if (hoverIdx == null) return;
-      const { ctx, chartArea, scales } = chart;
-      const x = scales?.x, y = scales?.y;
-      if (!x || !y) return;
-
-      const xPix = x.getPixelForValue(hoverIdx);
-      ctx.save();
-      ctx.strokeStyle = "rgba(148,163,184,0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(xPix, chartArea.top);
-      ctx.lineTo(xPix, chartArea.bottom);
-      ctx.stroke();
-
-      if (hoverBand) {
-        const tag = hoverBand === "p80" ? "80% band" : "95% band";
-        const pad = 6;
-        const textX = Math.min(Math.max(xPix + 8, chartArea.left + 4), chartArea.right - 104);
-        const textY = chartArea.top + 8;
-        ctx.font = "12px ui-sans-serif, system-ui, -apple-system";
-        ctx.fillStyle = "rgba(0,0,0,0.92)";
-        const w = ctx.measureText(tag).width + pad * 2;
-        ctx.fillRect(textX, textY, w, 18);
-        ctx.strokeStyle = hoverBand === "p80" ? GOLD : "rgba(255,255,255,0.28)";
-        ctx.strokeRect(textX, textY, w, 18);
-        ctx.fillStyle = "#E5E7EB";
-        ctx.fillText(tag, textX + pad, textY + 13);
-      }
-      ctx.restore();
-    },
-  };
-
-  React.useEffect(() => {
-    const c = chartRef.current?.canvas as HTMLCanvasElement | undefined | null;
-    if (!c) return;
-    const onLeave = () => { setHoverIdx(null); setHoverBand(null); c.style.cursor = "default"; };
-    c.addEventListener("mouseleave", onLeave);
-    return () => c.removeEventListener("mouseleave", onLeave);
-  }, []);
-
-  return (
-    <div data-chart="fan" className="relative w-full overflow-hidden" style={{ height: 360 }}>
-      <Line
-        ref={chartRef}
-        data={chartData}
-        options={options}
-        plugins={[hoverPlugin]}
-        role="img"
-        aria-label={`Fan chart for ${symbol} over ${horizon_days} days with median, 80% and 95% bands`}
-      />
-    </div>
-  );
+  return <canvas ref={canvasRef} className="w-full h-full" />;
 }
+

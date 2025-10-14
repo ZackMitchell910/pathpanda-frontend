@@ -23,6 +23,7 @@ import SimSummaryCard from "./components/SimSummaryCard";
 import TargetsAndOdds from "./TargetsAndOdds";
 import { applyChartTheme } from "@/theme/chartTheme";
 import QuotaCard from "./components/QuotaCard";
+import { resolveApiBase, resolveApiKey } from "@/utils/apiConfig";
 
 // Lazy charts
 const FanChart = React.lazy(() => import("./components/FanChart"));
@@ -70,8 +71,7 @@ interface MCArtifact {
 }
 interface RunSummary { id: string; symbol: string; horizon: number; n_paths: number; finishedAt: string; q50?: number | null; probUp?: number | null; }
 
-declare global { interface Window { __PP_API_BASE__?: string; } }
-const API_BASE = String((typeof window !== "undefined" && window.__PP_API_BASE__) || (import.meta as any)?.env?.VITE_PT_API_BASE || "").replace(/\/+$/, "");
+const API_BASE = resolveApiBase();
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 
 // Text-first helpers
@@ -79,8 +79,11 @@ async function safeText(r: Response) { try { return await r.text(); } catch { re
 function looksLikeHTML(s: string) { return /^\s*<!doctype html>|<html/i.test(s); }
 
 // Canonical headers (keeps existing contract)
-const resolvedPtKey = (): string => (DEFAULT_PT_KEY || "").trim();
-const apiHeaders = () => ({ Accept: "application/json", "Content-Type": "application/json", "X-API-Key": resolvedPtKey() });
+const apiHeaders = () => {
+  const key = resolveApiKey();
+  const baseHeaders = { Accept: "application/json", "Content-Type": "application/json" };
+  return key ? { ...baseHeaders, "X-API-Key": key } : baseHeaders;
+};
 
 // Minimal Palantir-style Card locally (neutral, subtle)
 const Card: React.FC<{ id?: string; title?: string; actions?: React.ReactNode; className?: string; children?: React.ReactNode }>
@@ -541,7 +544,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="mx-auto max-w-7xl px-6 pb-12 md:px-8 xl:grid xl:grid-cols-[minmax(0,1fr)_320px] xl:gap-6">
+        <div className="mx-auto max-w-7xl px-6 pb-12 md:px-8">
           <div className="space-y-6">
             <section id="overview" className="grid grid-cols-1 gap-6 pt-6 md:grid-cols-3">
               <Card id="overview-quant" className="md:col-span-2">
@@ -597,114 +600,114 @@ export default function App() {
             </section>
 
             <section id="simulation" className="space-y-6">
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <Card id="controls-card" title="Simulation Controls">
-                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    <Field label="Ticker / Symbol">
+              <Card id="controls-card" title="Simulation Controls">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <Field label="Ticker / Symbol">
+                    <input
+                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                      value={symbol}
+                      onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                      placeholder="e.g., NVDA"
+                    />
+                  </Field>
+                  <Field label="Horizon (days)">
+                    <input
+                      type="number"
+                      min={1}
+                      max={3650}
+                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                      value={horizon}
+                      onChange={(e) => {
+                        const v = e.currentTarget.value;
+                        if (v === "") return setHorizon("");
+                        const n = e.currentTarget.valueAsNumber;
+                        setHorizon(Number.isFinite(n) ? n : "");
+                      }}
+                      placeholder="30"
+                    />
+                  </Field>
+                  <Field label="Paths">
+                    <input
+                      type="number"
+                      min={100}
+                      step={100}
+                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                      value={paths}
+                      onChange={(e) => {
+                        const v = e.currentTarget.valueAsNumber;
+                        setPaths(Number.isFinite(v) ? v : paths);
+                      }}
+                      placeholder="2000"
+                    />
+                  </Field>
+                  <div className="col-span-2 lg:col-span-4">
+                    <Field label="X (Twitter) handles - optional">
                       <input
                         className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={symbol}
-                        onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                        placeholder="e.g., NVDA"
+                        value={xHandles}
+                        onChange={(e) => setXHandles(e.target.value)}
+                        placeholder="comma,separated,handles"
                       />
                     </Field>
-                    <Field label="Horizon (days)">
-                      <input
-                        type="number"
-                        min={1}
-                        max={3650}
-                        className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={horizon}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          if (v === "") return setHorizon("");
-                          const n = e.currentTarget.valueAsNumber;
-                          setHorizon(Number.isFinite(n) ? n : "");
-                        }}
-                        placeholder="30"
-                      />
-                    </Field>
-                    <Field label="Paths">
-                      <input
-                        type="number"
-                        min={100}
-                        step={100}
-                        className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={paths}
-                        onChange={(e) => {
-                          const v = e.currentTarget.valueAsNumber;
-                          setPaths(Number.isFinite(v) ? v : paths);
-                        }}
-                        placeholder="2000"
-                      />
-                    </Field>
-                    <div className="col-span-2 lg:col-span-4">
-                      <Field label="X (Twitter) handles - optional">
-                        <input
-                          className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                          value={xHandles}
-                          onChange={(e) => setXHandles(e.target.value)}
-                          placeholder="comma,separated,handles"
-                        />
-                      </Field>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeOptions}
-                        onChange={(e) => setIncludeOptions(e.target.checked)}
-                      />
-                      Include options
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeFutures}
-                        onChange={(e) => setIncludeFutures(e.target.checked)}
-                      />
-                      Include futures
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeNews}
-                        onChange={(e) => setIncludeNews(e.target.checked)}
-                      />
-                      Include news
-                    </label>
                   </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <LoadingButton
-                      label="Quick Sim"
-                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                      loading={isSimulating}
-                      onClick={() => !isSimulating && runSimulation("quick")}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={includeOptions}
+                      onChange={(e) => setIncludeOptions(e.target.checked)}
                     />
-                    <LoadingButton
-                      label="Deep Sim"
-                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                      loading={isSimulating}
-                      onClick={() => !isSimulating && runSimulation("deep")}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                    Include options
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={includeFutures}
+                      onChange={(e) => setIncludeFutures(e.target.checked)}
                     />
-                    <LoadingButton
-                      label="Predict"
-                      loadingLabel="Predicting..."
-                      loading={isPredicting}
-                      onClick={runPredict}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                    Include futures
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={includeNews}
+                      onChange={(e) => setIncludeNews(e.target.checked)}
                     />
-                    <LoadingButton
-                      label="Train Model"
-                      loadingLabel="Training..."
-                      loading={isTraining}
-                      onClick={trainModel}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                    />
-                  </div>
-                </Card>
+                    Include news
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <LoadingButton
+                    label="Quick Sim"
+                    loadingLabel={`Simulating... ${Math.round(progress)}%`}
+                    loading={isSimulating}
+                    onClick={() => !isSimulating && runSimulation("quick")}
+                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                  />
+                  <LoadingButton
+                    label="Deep Sim"
+                    loadingLabel={`Simulating... ${Math.round(progress)}%`}
+                    loading={isSimulating}
+                    onClick={() => !isSimulating && runSimulation("deep")}
+                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                  />
+                  <LoadingButton
+                    label="Predict"
+                    loadingLabel="Predicting..."
+                    loading={isPredicting}
+                    onClick={runPredict}
+                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                  />
+                  <LoadingButton
+                    label="Train Model"
+                    loadingLabel="Training..."
+                    loading={isTraining}
+                    onClick={trainModel}
+                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+                  />
+                </div>
+              </Card>
 
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
                 <Card
                   id="fan-card"
                   title="Price Forecast"
@@ -886,6 +889,12 @@ export default function App() {
               </EB>
             </section>
 
+            <section id="recent-runs">
+              <EB>
+                <RightRail recent={rightRailItems} className="md:w-full" />
+              </EB>
+            </section>
+
             <div className="flex items-center gap-2">
               <button
                 className="rounded-lg border border-white/15 bg-black/60 px-3 py-1.5 text-sm hover:bg-white/10"
@@ -896,18 +905,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
-          <aside className="hidden xl:block xl:pt-6">
-            <EB>
-              <RightRail recent={rightRailItems} className="sticky top-24" />
-            </EB>
-          </aside>
-        </div>
-
-        <div className="mx-auto max-w-7xl px-6 pb-8 md:px-8 xl:hidden">
-          <EB>
-            <RightRail recent={rightRailItems} />
-          </EB>
         </div>
       </EB>
 

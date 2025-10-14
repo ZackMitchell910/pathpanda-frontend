@@ -2,6 +2,7 @@
 // File: src/components/QuotaCard.tsx
 // ==========================
 import React, { useEffect, useState } from "react";
+import { resolveApiBase, resolveApiKey } from "@/utils/apiConfig";
 
 type Limits = {
   ok: boolean;
@@ -31,38 +32,22 @@ async function fetchLimits(apiBase: string, apiKey: string): Promise<Limits> {
 }
 
 export default function QuotaCard() {
-  // Resolve API base & key (aligns with your existing helper)
-  const API_BASE = String(
-    (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-      (import.meta as any)?.env?.VITE_PT_API_BASE ||
-      ""
-  ).replace(/\/+$/, "");
-
-  const resolvedPtKey = (): string => {
-    // Prefer window storage your app already uses; fallback to localStorage
-    const w = typeof window !== "undefined" ? (window as any) : {};
-    if (w.__PP_KEY__) return String(w.__PP_KEY__);
-    const ls =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem("pp_api_key")
-        : "";
-    return String(ls || "");
-  };
+  const apiBase = resolveApiBase();
 
   const [data, setData] = useState<Limits | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const key = resolvedPtKey();
-    if (!API_BASE || !key) {
+    const key = resolveApiKey();
+    if (!apiBase || !key) {
       setErr("Missing API base or API key");
       return;
     }
-    fetchLimits(API_BASE, key)
+    fetchLimits(apiBase, key)
       .then(setData)
       .catch((e) => setErr(String(e)));
-  }, [API_BASE]);
+  }, [apiBase]);
 
   // simple 1s countdown tick for reset timer
   useEffect(() => {

@@ -1,5 +1,6 @@
 // src/hooks/useNews.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { resolveApiBase } from "@/utils/apiConfig";
 
 type NewsItem = {
   id: string;
@@ -23,14 +24,8 @@ type UseNewsArgs = {
   retry?: number;
 };
 
-const RAW_API_BASE =
-  (typeof window !== "undefined" && (window as any).__PP_API_BASE__) ||
-  (import.meta as any)?.env?.VITE_PREDICTIVE_API ||
-  (import.meta as any)?.env?.VITE_API_BASE ||
-  (typeof process !== "undefined" && (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL) ||
-  "https://pathpanda-api.onrender.com";
-
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+const FALLBACK_API_BASE = "https://api.simetrix.io/";
+const DEFAULT_API_BASE = resolveApiBase(FALLBACK_API_BASE);
 
 export function useNews({
   symbol,
@@ -52,7 +47,7 @@ export function useNews({
 
   const resolvedBase = useMemo(() => {
     const candidate = (apiBase || "").trim();
-    const base = candidate.length ? candidate : API_BASE;
+    const base = candidate.length ? candidate : DEFAULT_API_BASE;
     return base.replace(/\/+$/, "");
   }, [apiBase]);
   const api = useCallback(
