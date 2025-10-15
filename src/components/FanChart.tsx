@@ -29,12 +29,40 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
   const chartRef = useRef<ChartJS | null>(null);
 
   const dataSeries = useMemo(() => {
-    const xs = artifact.median_path.map(([d]) => d);
-    const median = artifact.median_path.map(([, y]) => y);
-    const p80L = artifact.bands.p80_low.map(([, y]) => y);
-    const p80H = artifact.bands.p80_high.map(([, y]) => y);
-    const p95L = artifact.bands.p95_low.map(([, y]) => y);
-    const p95H = artifact.bands.p95_high.map(([, y]) => y);
+    const sanitizePoints = (points?: [number, number][]) =>
+      Array.isArray(points)
+        ? points.filter(
+            (pt): pt is [number, number] =>
+              Array.isArray(pt) &&
+              pt.length >= 2 &&
+              Number.isFinite(pt[0]) &&
+              Number.isFinite(pt[1])
+          )
+        : [];
+
+    const medianPoints = sanitizePoints(artifact?.median_path);
+    const xs = medianPoints.map(([d]) => d);
+    const median = medianPoints.map(([, y]) => y);
+
+    const alignBand = (points?: [number, number][]) => {
+      if (!xs.length) return [] as number[];
+      const sanitized = sanitizePoints(points);
+      if (!sanitized.length) {
+        return xs.map((_, i) => (Number.isFinite(median[i]) ? median[i] : 0));
+      }
+      return xs.map((_, i) => {
+        const value = sanitized[i]?.[1];
+        if (Number.isFinite(value)) return value as number;
+        const fallback = median[i];
+        return Number.isFinite(fallback) ? fallback : 0;
+      });
+    };
+
+    const p80L = alignBand(artifact?.bands?.p80_low);
+    const p80H = alignBand(artifact?.bands?.p80_high);
+    const p95L = alignBand(artifact?.bands?.p95_low);
+    const p95H = alignBand(artifact?.bands?.p95_high);
+
     return { xs, median, p80L, p80H, p95L, p95H };
   }, [artifact]);
 

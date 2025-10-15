@@ -40,6 +40,9 @@ const f2 = (n: any) => Number(n).toFixed(2);
 
 type SimMode = "quick" | "deep";
 
+const QUICK_LOOKBACK_DAYS = 180;
+const DEEP_LOOKBACK_DAYS = 3650;
+
 const DASHBOARD_NAV = [
   { label: "Overview", href: "#overview" },
   { label: "Simulation", href: "#simulation" },
@@ -217,24 +220,40 @@ export default function App() {
   };
 
   // Backend calls
-  async function trainModel() {
+  const clampLookback = (days: number) => {
+    const d = Math.floor(Number(days));
+    if (!Number.isFinite(d) || d <= 0) return DEEP_LOOKBACK_DAYS;
+    return Math.max(30, Math.min(d, DEEP_LOOKBACK_DAYS));
+  };
+
+  type TrainOptions = {
+    lookbackDays?: number;
+    label?: string;
+  };
+
+  async function trainModel(options: TrainOptions = {}): Promise<boolean> {
+    const lookbackDays = clampLookback(options.lookbackDays ?? DEEP_LOOKBACK_DAYS);
+    const actionLabel =
+      options.label ?? `${symbol.toUpperCase()}: training (${lookbackDays}d history)`;
     setIsTraining(true);
-    throttledLog("Training model...");
+    throttledLog(`${actionLabel}...`);
     try {
       const resp = await fetch(api("/train"), {
         method: "POST",
         credentials: "include",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), lookback_days: 3650 }),
+        body: JSON.stringify({ symbol: symbol.toUpperCase(), lookback_days: lookbackDays }),
       });
       const text = await safeText(resp);
       if (!resp.ok) {
         if (looksLikeHTML(text)) throw new Error("Misrouted to HTML. Check API base.");
         throw new Error(`Train failed: ${resp.status} - ${text}`);
       }
-      throttledLog("Model trained successfully.");
+      throttledLog(`${actionLabel} complete.`);
+      return true;
     } catch (e: any) {
-      throttledLog(`Error: ${e.message || e}`);
+      throttledLog(`Training error: ${e?.message || e}`);
+      return false;
     } finally {
       setIsTraining(false);
     }
@@ -274,6 +293,10 @@ export default function App() {
     if (!Number.isFinite(hNum) || hNum < 1) { throttledLog("Error: Please enter a horizon (days)."); return; }
     if (hNum > 3650) { throttledLog("Error: Horizon must be <= 3650 days (10 years)."); return; }
     const pNum = Math.max(100, Math.min(Number(paths) || 2000, 10000));
+    if (isTraining) {
+      throttledLog("Training already in progress. Please wait for it to finish before running a simulation.");
+      return;
+    }
 
     setIsSimulating(true);
     setLogMessages([]);
@@ -285,6 +308,20 @@ export default function App() {
     setRunId(null);
     setProbUpNext(null);
     try {
+      const lookbackDays = mode === "deep" ? DEEP_LOOKBACK_DAYS : QUICK_LOOKBACK_DAYS;
+      const trained = await trainModel({
+        lookbackDays,
+        label:
+          mode === "deep"
+            ? `${symbol.toUpperCase()}: deep training (${lookbackDays}d history)`
+            : `${symbol.toUpperCase()}: quick warm-up (${lookbackDays}d history)`,
+      });
+      if (!trained) {
+        throttledLog("Simulation aborted because training failed.");
+        setIsSimulating(false);
+        return;
+      }
+
       const payload: any = {
         mode,
         symbol: symbol.toUpperCase(),
@@ -701,7 +738,7 @@ export default function App() {
                     label="Train Model"
                     loadingLabel="Training..."
                     loading={isTraining}
-                    onClick={trainModel}
+                    onClick={() => { void trainModel({ lookbackDays: DEEP_LOOKBACK_DAYS }); }}
                     className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
                   />
                 </div>
