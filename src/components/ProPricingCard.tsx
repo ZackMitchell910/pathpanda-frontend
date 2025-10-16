@@ -1,11 +1,10 @@
-//import React from "react";
-//import { Check } from "lucide-react";
+import { Check } from "lucide-react";
 
-//export default function ProPricingCard({
-  checkoutUrl = "#pro-checkout",
-}: {
+type Props = {
   checkoutUrl?: string;
-}) {
+};
+
+export default function ProPricingCard({ checkoutUrl = "#pro-checkout" }: Props) {
   return (
     <section className="relative rounded-2xl border border-white/10 bg-[#0f1216]/70 p-6 md:p-7 shadow-[0_0_40px_rgba(16,185,129,0.08)]">
       {/* Header */}
@@ -41,7 +40,7 @@
         className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-emerald-400 text-[#0A111A] font-semibold px-4 py-2.5 hover:brightness-110 transition focus:outline-none focus:ring-2 focus:ring-emerald-400/60"
         aria-label="Start Pro (Beta $0.00)"
       >
-        Start Pro — $0.00
+        Start Pro - $0.00
       </a>
 
       {/* Feature list */}
@@ -51,10 +50,10 @@
           "Fan chart, targets, hit-probability",
           "Daily Quant pick + finalists",
           "Export summary & artifacts",
-        ].map((f) => (
-          <li key={f} className="flex items-center gap-2 text-white/80">
-            <Check className="w-4 h-4 text-emerald-300" />
-            <span>{f}</span>
+        ].map((feature) => (
+          <li key={feature} className="flex items-center gap-2 text-white/80">
+            <Check className="h-4 w-4 text-emerald-300" />
+            <span>{feature}</span>
           </li>
         ))}
       </ul>

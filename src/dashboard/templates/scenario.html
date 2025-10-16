@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MarketSimulator · Simetrix</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #010409;
+        --bg-soft: rgba(8, 12, 24, 0.75);
+        --card: rgba(255, 255, 255, 0.04);
+        --card-raised: rgba(255, 255, 255, 0.06);
+        --border: rgba(255, 255, 255, 0.12);
+        --border-strong: rgba(255, 255, 255, 0.18);
+        --fg: #f9fafb;
+        --fg-soft: rgba(249, 250, 251, 0.68);
+        --fg-muted: rgba(249, 250, 251, 0.45);
+        --accent: #facc15;
+        --accent-soft: rgba(250, 204, 21, 0.16);
+        --accent-strong: rgba(250, 204, 21, 0.28);
+        --positive: #34d399;
+        --negative: #f87171;
+        --font: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--fg);
+      }
+
+      body {
+        position: relative;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      ::selection {
+        background: rgba(250, 204, 21, 0.22);
+        color: #0b1120;
+      }
+
+      .texture::before,
+      .texture::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: -2;
+      }
+
+      .texture::before {
+        background: radial-gradient(
+            60% 30% at 50% 0%,
+            rgba(250, 204, 21, 0.08),
+            rgba(250, 204, 21, 0) 65%
+          ),
+          radial-gradient(45% 45% at 5% 90%, rgba(56, 189, 248, 0.07), transparent 70%);
+      }
+
+      .texture::after {
+        opacity: 0.06;
+        mix-blend-mode: screen;
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23n)" opacity="0.35"/></svg>');
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(16px);
+        background: rgba(1, 4, 9, 0.72);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .nav {
+        margin: 0 auto;
+        max-width: 1080px;
+        height: 56px;
+        padding: 0 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--fg);
+        font-weight: 600;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .nav-links a {
+        position: relative;
+        padding: 6px 10px;
+        border-radius: 999px;
+        transition: color 160ms ease;
+      }
+
+      .nav-links a::after {
+        content: "";
+        position: absolute;
+        inset: -4px;
+        border-radius: 999px;
+        background: radial-gradient(
+          110px 110px at 50% 50%,
+          rgba(255, 255, 255, 0.15),
+          transparent 65%
+        );
+        opacity: 0;
+        transition: opacity 180ms ease;
+        z-index: -1;
+      }
+
+      .nav-links a:hover {
+        color: var(--fg);
+      }
+
+      .nav-links a:hover::after {
+        opacity: 1;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 1080px;
+        padding: 48px 24px 96px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 24px;
+      }
+
+      .hero-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.05);
+        padding: 6px 14px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: var(--fg-muted);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(32px, 4vw, 44px);
+        line-height: 1.15;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .hero-copy {
+        max-width: 700px;
+        color: var(--fg-soft);
+        font-size: 16px;
+        line-height: 1.45;
+      }
+
+      .samples {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .sample-chip {
+        padding: 6px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--fg-soft);
+        cursor: pointer;
+        transition: background 160ms ease, border 160ms ease;
+      }
+
+      .sample-chip:hover {
+        background: rgba(255, 255, 255, 0.09);
+        border-color: rgba(255, 255, 255, 0.16);
+        color: var(--fg);
+      }
+
+      .layout {
+        margin-top: 36px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+        gap: 28px;
+      }
+
+      .card {
+        border-radius: 18px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        padding: 24px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        background: radial-gradient(
+          260px 180px at 20% 20%,
+          rgba(255, 255, 255, 0.06),
+          transparent 70%
+        );
+        opacity: 0.7;
+      }
+
+      .card h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .card p {
+        margin: 8px 0 0;
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+
+      .textarea {
+        margin-top: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 200px;
+        resize: vertical;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(4, 7, 16, 0.85);
+        color: var(--fg);
+        padding: 16px;
+        font-family: var(--font);
+        font-size: 14px;
+        line-height: 1.5;
+        transition: border 160ms ease, box-shadow 160ms ease, background 160ms ease;
+      }
+
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent-strong);
+        box-shadow: 0 0 0 1px var(--accent-strong);
+        background: rgba(15, 23, 42, 0.85);
+      }
+
+      .input-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+
+      .cta-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        border-radius: 14px;
+        border: none;
+        background: linear-gradient(135deg, rgba(250, 204, 21, 0.85), rgba(250, 179, 8, 0.95));
+        color: #111827;
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.01em;
+        padding: 12px 20px;
+        cursor: pointer;
+        box-shadow: 0 12px 35px rgba(250, 204, 21, 0.28);
+        transition: transform 160ms ease, box-shadow 160ms ease;
+      }
+
+      .cta-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        box-shadow: none;
+        transform: none;
+      }
+
+      .cta-button:not(:disabled):hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 40px rgba(250, 204, 21, 0.32);
+      }
+
+      kbd {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 6px;
+        font-size: 11px;
+        padding: 2px 6px;
+        color: var(--fg-soft);
+        margin-left: 4px;
+      }
+
+      .status {
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+
+      .results-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .results-list {
+        margin-top: 20px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .placeholder {
+        padding: 32px;
+        border-radius: 16px;
+        border: 1px dashed rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--fg-muted);
+        text-align: center;
+        font-size: 14px;
+      }
+
+      .impact-card {
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(3, 7, 18, 0.86);
+        padding: 18px 20px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .impact-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        color: var(--fg-muted);
+      }
+
+      .impact-ticker {
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--fg);
+      }
+
+      .score-chip {
+        padding: 4px 9px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        font-size: 12px;
+        color: var(--fg-soft);
+      }
+
+      .metrics {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      }
+
+      .metric {
+        display: grid;
+        gap: 4px;
+        font-size: 13px;
+      }
+
+      .metric-label {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 11px;
+        color: var(--fg-muted);
+      }
+
+      .metric-value {
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .metric-value.positive {
+        color: var(--positive);
+      }
+
+      .metric-value.negative {
+        color: var(--negative);
+      }
+
+      .orders {
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+        padding-top: 14px;
+      }
+
+      .orders-title {
+        margin: 0 0 10px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--fg-soft);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      thead {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--fg);
+      }
+
+      th,
+      td {
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        text-align: left;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .projection-preview {
+        border-radius: 14px;
+        background: rgba(5, 9, 18, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        padding: 14px;
+        color: rgba(245, 245, 245, 0.78);
+        max-height: 220px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      footer {
+        margin-top: 48px;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+        text-align: center;
+      }
+
+      @media (max-width: 980px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 600px) {
+        .nav {
+          padding: 0 16px;
+        }
+
+        .card {
+          padding: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body class="texture">
+    <header>
+      <div class="nav">
+        <a class="nav-brand" href="/">
+          <span>SIMETRIX</span>
+          <span style="font-size: 9px; letter-spacing: 0.34em; color: var(--fg-muted)">/ MARKETSIMULATOR</span>
+        </a>
+        <div class="nav-links">
+          <a href="/">Landing</a>
+          <a href="/docs">Docs</a>
+          <a href="mailto:info@simetrix.io?subject=MarketSimulator%20Preview">Contact</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <span class="hero-pill">Market Simulator Preview</span>
+        <h1>Run narrative shocks across the synthetic market twin.</h1>
+        <p class="hero-copy">
+          Inject policy shifts, macro surprises, or desk intel and watch the synthetic market twin propagate impacts
+          across correlated assets. Each scenario records projected bars, liquidity drains, and agent traffic so you can
+          rehearse the narrative before it plays out in the wild.
+        </p>
+        <div class="samples">
+          <span class="sample-chip" data-sample="Fed surprises with a 75 bps rate hike, dollar surges, tech megacaps gap down while regional banks rally on net interest margin optimism.">
+            Fed surprise hike
+          </span>
+          <span class="sample-chip" data-sample="An AI safety headline spooks semiconductor supply chains; NVDA and AMD gap lower while energy rotates higher on risk-off flows.">
+            AI safety shock
+          </span>
+          <span class="sample-chip" data-sample="OPEC announces sudden production cuts over the weekend; crude jumps, airlines gap lower, and inflation-sensitive bonds sell off.">
+            OPEC cut weekend
+          </span>
+        </div>
+      </section>
+
+      <section class="layout">
+        <article class="card">
+          <h2>Scenario builder</h2>
+          <p>Describe the catalyst, affected players, and any timing modifiers. CTRL + Enter runs the simulation.</p>
+          <div class="textarea">
+            <textarea
+              id="scenarioText"
+              placeholder="Example: Treasury announces emergency funding facility over the weekend, bank liquidity improves but dollar weakens, short-vol desks scramble to cover."
+              spellcheck="false"
+            ></textarea>
+            <div class="input-actions">
+              <button id="runBtn" class="cta-button" type="button">
+                Run scenario
+              </button>
+              <span class="status" id="status">Waiting for input.</span>
+              <div class="status">
+                Shortcut<kbd>Ctrl</kbd><kbd>Enter</kbd>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="results-header">
+            <div>
+              <h2>Impacted assets</h2>
+              <p>Ordered by confidence score and scenario sensitivity.</p>
+            </div>
+          </div>
+          <div id="results" class="results-list">
+            <div class="placeholder">
+              Run a scenario to populate the synthetic order book and projection set.
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <footer>
+        MarketSimulator — Synthetic market twin · Narrative shocks · Liquidity rehearsal
+      </footer>
+    </main>
+
+    <script>
+      const runBtn = document.getElementById("runBtn");
+      const textArea = document.getElementById("scenarioText");
+      const results = document.getElementById("results");
+      const statusLabel = document.getElementById("status");
+
+      document.querySelectorAll(".sample-chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const sample = chip.getAttribute("data-sample");
+          if (!sample) return;
+          textArea.value = sample;
+          textArea.focus();
+          statusLabel.textContent = "Sample loaded — press Run.";
+        });
+      });
+
+      function renderResults(data) {
+        results.innerHTML = "";
+
+        if (!data.impacts || !Array.isArray(data.impacts) || !data.impacts.length) {
+          results.innerHTML =
+            '<div class="placeholder">No impacted tickers surfaced. Refine the narrative and try again.</div>';
+          return;
+        }
+
+        data.impacts.forEach((impact) => {
+          const card = document.createElement("div");
+          card.className = "impact-card";
+
+          const series = Array.isArray(impact.projection) ? impact.projection : [];
+          const first = series[0] || {};
+          const last = series[series.length - 1] || {};
+          const open = Number(first.open || 0);
+          const close = Number(last.close || 0);
+          const delta = close - open;
+          const pct = open ? (delta / open) * 100 : 0;
+          const dirClass = delta >= 0 ? "positive" : "negative";
+          const sign = delta >= 0 ? "+" : "-";
+
+          card.innerHTML = `
+            <div class="impact-header">
+              <span class="impact-ticker">${impact.ticker ?? "UNKNOWN"}</span>
+              <span class="score-chip">Score ${Number(impact.score ?? 0).toFixed(2)}</span>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <span class="metric-label">Projected bars</span>
+                <span class="metric-value">${series.length}</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Net move</span>
+                <span class="metric-value ${dirClass}">${sign}${Math.abs(delta).toFixed(2)}</span>
+              </div>
+              <div class="metric">
+                <span class="metric-label">Net percent</span>
+                <span class="metric-value ${dirClass}">${sign}${Math.abs(pct).toFixed(2)}%</span>
+              </div>
+            </div>
+          `;
+
+          if (Array.isArray(impact.orders) && impact.orders.length) {
+            const ordersDiv = document.createElement("div");
+            ordersDiv.className = "orders";
+            const rows = impact.orders
+              .map((order) => {
+                const qty = Number(order.qty ?? 0).toFixed(2);
+                const limit = order.price_limit != null ? Number(order.price_limit).toFixed(2) : "-";
+                return `
+                  <tr>
+                    <td>${order.agent_id ?? "-"}</td>
+                    <td>${order.side ?? "-"}</td>
+                    <td>${qty}</td>
+                    <td>${limit}</td>
+                  </tr>
+                `;
+              })
+              .join("");
+            ordersDiv.innerHTML = `
+              <h3 class="orders-title">Agent orders</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Limit</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            `;
+            card.appendChild(ordersDiv);
+          }
+
+          const preview = document.createElement("div");
+          preview.className = "projection-preview";
+          const shown = series.slice(0, 8);
+          preview.textContent =
+            JSON.stringify(shown, null, 2) + (series.length > shown.length ? "\n..." : "");
+          card.appendChild(preview);
+
+          results.appendChild(card);
+        });
+      }
+
+      async function runScenario() {
+        const text = textArea.value.trim();
+        if (!text) {
+          statusLabel.textContent = "Please describe a scenario first.";
+          textArea.focus();
+          return;
+        }
+
+        runBtn.disabled = true;
+        statusLabel.textContent = "Simulating...";
+        results.innerHTML = "";
+
+        try {
+          const response = await fetch("/scenario", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, steps: 30 })
+          });
+
+          if (!response.ok) {
+            const errPayload = await response.json().catch(() => ({}));
+            throw new Error(errPayload.detail || "Scenario failed");
+          }
+
+          const payload = await response.json();
+          statusLabel.textContent = payload.generated_at
+            ? `Generated at ${payload.generated_at}`
+            : "Simulation complete.";
+          renderResults(payload);
+        } catch (error) {
+          console.error(error);
+          statusLabel.textContent = error.message || "Scenario failed";
+          results.innerHTML =
+            '<div class="placeholder">Something went wrong — try refining the scenario or checking the server logs.</div>';
+        } finally {
+          runBtn.disabled = false;
+        }
+      }
+
+      runBtn.addEventListener("click", runScenario);
+      textArea.addEventListener("keydown", (event) => {
+        if (event.ctrlKey && event.key === "Enter") {
+          event.preventDefault();
+          runScenario();
+        }
+      });
+    </script>
+  </body>
+</html>

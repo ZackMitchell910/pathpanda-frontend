@@ -116,6 +116,8 @@ export default function Landing() {
         </div>
       </section>
 
+      <ProductsSection />
+
       {/* Features */}
       <FeaturesSection />
 
@@ -330,6 +332,72 @@ function Band({ d, fill }: { d: string; fill: string }) {
 }
 
 /* ---------- New Sections ---------- */
+function ProductsSection() {
+  const products = [
+    {
+      name: "Simetrix Dash",
+      description: "Forecasting console for Monte Carlo simulations, drivers, and daily quant signals.",
+      href: "/app",
+      status: "Live",
+      icon: LineChart,
+    },
+    {
+      name: "MarketSimulator",
+      description: "Run narrative shocks across the synthetic market twin.",
+      href: "/market-simulator",
+      status: "Coming soon",
+      icon: Sparkles,
+    },
+  ];
+
+  return (
+    <section id="products" className="mx-auto max-w-7xl px-6 md:px-8 py-16 border-t border-white/10">
+      <div className="mb-8 text-center">
+        <h2 className="font-brand text-2xl md:text-3xl">Products</h2>
+        <p className="mt-2 text-white/60">Choose the workspace that fits your simulation workflow.</p>
+      </div>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        {products.map((product, index) => {
+          const Icon = product.icon;
+          const isComingSoon = product.status.toLowerCase().includes("coming");
+          return (
+            <motion.a
+              key={product.name}
+              href={product.href}
+              initial={{ opacity: 0, y: 12 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.6, delay: index * 0.05 }}
+              className="group relative flex flex-col rounded-2xl border border-white/10 bg-white/5 p-6 transition-colors hover:border-white/20 hover:bg-white/10"
+            >
+              <div className="flex items-center justify-between text-xs text-white/60">
+                <span className="inline-flex items-center gap-2 text-white/80">
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-white/10">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-semibold text-white">{product.name}</span>
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] ${
+                    isComingSoon ? "border border-amber-400/40 bg-amber-400/10 text-amber-200" : "border border-emerald-400/40 bg-emerald-400/15 text-emerald-200"
+                  }`}
+                >
+                  {product.status}
+                </span>
+              </div>
+              <p className="mt-3 text-sm text-white/70">{product.description}</p>
+              <span className="mt-6 inline-flex items-center gap-2 text-sm text-white/80">
+                {isComingSoon ? "Preview" : "Open"}
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+              </span>
+            </motion.a>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function FeaturesSection() {
   const items = [
     { title: "Autonomous Forecasting Engine", desc: "Unattended runs with cohort logging and settlement.", Icon: LineChart },
@@ -338,7 +406,7 @@ function FeaturesSection() {
     { title: "Analysts • Traders • Institutions", desc: "Role‑ready workflows with quotas and audit trails.", Icon: Users },
   ];
   return (
-    <section className="mx-auto max-w-7xl px-6 md:px-8 py-16 border-t border-white/10">
+    <section id="features" className="mx-auto max-w-7xl px-6 md:px-8 py-16 border-t border-white/10">
       <div className="text-center mb-10">
         <h2 className="font-brand text-2xl md:text-3xl">Signal. Risk. Explainability.</h2>
         <p className="text-white/60 mt-2">Everything you need to move from guesswork to probability-based strategies.</p>

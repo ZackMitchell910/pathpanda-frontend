@@ -2,7 +2,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 export default function NavBar() {
   const items: Array<[string, string]> = [
-    ["Product", "/#features"],
+    ["Products", "/#products"],
+    ["Features", "/#features"],
     ["Pricing", "/#pricing"],
     ["Docs", "/docs"],
     ["Open Dashboard", "/app"],

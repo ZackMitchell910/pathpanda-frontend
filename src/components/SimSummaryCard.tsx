@@ -56,7 +56,7 @@ export default function SimSummaryCard({
         const url = force
           ? `${apiBase}/runs/${runId}/summary?refresh=1`
           : `${apiBase}/runs/${runId}/summary`;
-        const r = await fetch(url, { headers });
+        const r = await fetch(url, { headers, credentials: "include" });
         // treat "not ready yet" as pending
         if ([202, 404, 425].includes(r.status)) {
           if (attempt < maxRetries && !cancelled) {
@@ -98,6 +98,7 @@ export default function SimSummaryCard({
       setError(null);
       const r = await fetch(`${apiBase}/runs/${runId}/summary?refresh=1`, {
         headers,
+        credentials: "include",
       });
       if (!r.ok && ![202, 404, 425].includes(r.status)) {
         const txt = await safeText(r);

@@ -4,7 +4,7 @@
 // =============================================
 import React, { useEffect, useMemo, useRef } from "react";
 import Chart from "chart.js/auto";
-import type { Chart as ChartJS, ChartOptions, Plugin } from "chart.js";
+import type { Chart as ChartJS, ChartOptions, Plugin, TooltipItem } from "chart.js";
 
 type MCArtifact = {
   symbol: string;
@@ -76,17 +76,18 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
       chartRef.current = null;
     }
 
+    const { xs, median, p80L, p80H, p95L, p95H } = dataSeries;
+
     // Custom plugin to paint fan bands under the line using direct canvas
-    const fanBands: Plugin = {
+    const fanBands: Plugin<"line"> = {
       id: "fanBands",
       beforeDatasetsDraw(c) {
         const { chartArea, ctx } = c;
-        const { top, bottom, left, right } = chartArea;
+        const { top, bottom } = chartArea;
         const xScale: any = c.scales.x;
         const yScale: any = c.scales.y;
         if (!xScale || !yScale) return;
 
-        const { xs, p95L, p95H, p80L, p80H } = dataSeries;
         if (!xs.length) return;
 
         // helper to trace band path between low and high arrays
@@ -131,9 +132,7 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
       },
     };
 
-    Chart.register(fanBands);
-
-    const options: ChartOptions<any> = {
+    const options: ChartOptions<"line"> = {
       animation: false,
       responsive: true,
       maintainAspectRatio: false,
@@ -158,15 +157,14 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
           borderColor: "rgba(255,255,255,0.12)",
           borderWidth: 1,
           callbacks: {
-            title: (items) => `Day ${items?.[0]?.parsed?.x ?? ""}`,
-            label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed?.(2)}`,
+            title: (items: TooltipItem<"line">[]) => `Day ${items?.[0]?.parsed?.x ?? ""}`,
+            label: (ctx: TooltipItem<"line">) => ` ${ctx.dataset.label}: ${ctx.parsed.y?.toFixed?.(2)}`,
           },
         },
       },
       elements: { line: { tension: 0.2 } },
     };
 
-    const xs = dataSeries.xs;
     const chart = new Chart(ctx, {
       type: "line",
       data: {
@@ -174,7 +172,7 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
         datasets: [
           {
             label: "Median",
-            data: dataSeries.median,
+            data: median,
             borderColor: MEDIAN,
             backgroundColor: MEDIAN,
             borderWidth: 2,
@@ -183,6 +181,7 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
         ],
       },
       options,
+      plugins: [fanBands],
     });
 
     chartRef.current = chart;
@@ -190,10 +189,9 @@ export default function FanChart({ artifact }: { artifact: MCArtifact }) {
     return () => {
       chart.destroy();
       chartRef.current = null;
-      Chart.unregister(fanBands);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artifact, dataSeries.xs.join("," )]);
+  }, [artifact]);
 
   return <canvas ref={canvasRef} className="w-full h-full" />;
 }

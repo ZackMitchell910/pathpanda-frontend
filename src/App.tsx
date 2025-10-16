@@ -1,11 +1,16 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from "react";
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Toaster } from "react-hot-toast";
 import toast from "react-hot-toast";
 import html2canvas from "html2canvas";
 import "chart.js/auto";
-import { fetchEventSource } from "@microsoft/fetch-event-source";
 import DailyQuantCard from "./components/DailyQuantCard";
-import { throttle } from "./utils/throttle";
 import { encodeState } from "./utils/stateShare";
 
 import NewsList from "./components/NewsList";
@@ -15,15 +20,20 @@ import { SummaryCard } from "./components/SummaryCard";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import RightRail from "./components/RightRail";
 import { TrackRecordPanel } from "./components/TrackRecordPanel";
+import type { RunRow } from "./components/TrackRecordPanel";
 import { CardMenu } from "@/components/ui/CardMenu";
 import LogoSimetrix from "@/components/branding/LogoSimetrix";
 import LoadingButton from "./components/ui/LoadingButton";
 import ListCard from "./ListCard";
+import TickerAutocomplete from "./components/TickerAutocomplete";
 import SimSummaryCard from "./components/SimSummaryCard";
 import TargetsAndOdds from "./TargetsAndOdds";
 import { applyChartTheme } from "@/theme/chartTheme";
 import QuotaCard from "./components/QuotaCard";
+import ContextRibbon from "./components/ContextRibbon";
 import { resolveApiBase, resolveApiKey } from "@/utils/apiConfig";
+import { DashboardProvider, useDashboard } from "@/dashboard/DashboardProvider";
+import type { SimMode, MCArtifact, RunSummary } from "@/types/simulation";
 
 // Lazy charts
 const FanChart = React.lazy(() => import("./components/FanChart"));
@@ -38,10 +48,7 @@ const DriversWaterfall = React.lazy(() =>
 const ChartFallback: React.FC = () => <div className="text-xs text-white/50">Loading chart...</div>;
 const f2 = (n: any) => Number(n).toFixed(2);
 
-type SimMode = "quick" | "deep";
-
-const QUICK_LOOKBACK_DAYS = 180;
-const DEEP_LOOKBACK_DAYS = 3650;
+const DEFAULT_POLYGON_API_KEY = ""; // intentionally blank; require user-supplied key
 
 const DASHBOARD_NAV = [
   { label: "Overview", href: "#overview" },
@@ -52,34 +59,45 @@ const DASHBOARD_NAV = [
 ] as const;
 
 // ---- Types ----
-interface MCArtifact {
-  symbol: string;
-  horizon_days: number;
-  median_path: [number, number][];
-  bands: {
-    p50: [number, number][];
-    p80_low: [number, number][];
-    p80_high: [number, number][];
-    p95_low: [number, number][];
-    p95_high: [number, number][];
-  };
-  prob_up_end: number;
-  drivers: { feature: string; weight: number }[];
-  terminal_prices?: number[];
-  var_es?: { var95: number; es95: number };
-  hit_probs?: { thresholds_abs: number[]; probs_by_day: number[][] };
-  eod_estimate?: { day_index: number; median: number; mean: number; p05: number; p95: number };
-  targets?: { spot: number; horizon_days: number; levels: Array<{ label: string; price: number; hitEver?: number; hitByEnd?: number; tMedDays?: number }>; };
-  prob_up_next?: number;
-}
-interface RunSummary { id: string; symbol: string; horizon: number; n_paths: number; finishedAt: string; q50?: number | null; probUp?: number | null; }
+type MaybeNumber = number | string | null | undefined;
+
+type DiagnosticsSnapshot = {
+  mu?: { pre?: number | null; post?: number | null } | null;
+  sigma?: { pre?: number | null; post?: number | null } | null;
+  mu_pre?: number | null;
+  mu_post?: number | null;
+  sigma_pre?: number | null;
+  sigma_post?: number | null;
+  sentiment?: {
+    avg_sent_7d?: MaybeNumber;
+    avg_sent_last24h?: MaybeNumber;
+    last24h?: MaybeNumber;
+    avg7d?: MaybeNumber;
+  } | null;
+  earnings?: {
+    surprise_pct?: MaybeNumber;
+    surprise_percent?: MaybeNumber;
+    surprise?: MaybeNumber;
+    days_since?: MaybeNumber;
+    last_days?: MaybeNumber;
+  } | null;
+  macro?: {
+    rff?: MaybeNumber;
+    cpi_yoy?: MaybeNumber;
+    u_rate?: MaybeNumber;
+    updated_at?: string | null;
+  } | null;
+  regime?: { name?: string | null; score?: MaybeNumber } | null;
+  scheduler?: Record<string, unknown> | null;
+  context?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
 
 const API_BASE = resolveApiBase();
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 
 // Text-first helpers
 async function safeText(r: Response) { try { return await r.text(); } catch { return "<no body>"; } }
-function looksLikeHTML(s: string) { return /^\s*<!doctype html>|<html/i.test(s); }
 
 // Canonical headers (keeps existing contract)
 const apiHeaders = () => {
@@ -105,8 +123,18 @@ const Card: React.FC<{ id?: string; title?: string; actions?: React.ReactNode; c
 const EB: React.FC<React.PropsWithChildren> = ({ children }) => <ErrorBoundary>{children}</ErrorBoundary>;
 
 export default function App() {
+  const getAuthHeaders = useCallback(() => apiHeaders(), []);
+  return (
+    <DashboardProvider api={api} getAuthHeaders={getAuthHeaders}>
+      <DashboardApp />
+    </DashboardProvider>
+  );
+}
+
+function DashboardApp() {
+  const { sim, getAuthHeaders } = useDashboard();
   // --- helpers ---
-  const LOG_HEIGHT = "h-40";
+  const LOG_HEIGHT = "h-48";
   const coerceDays = (h: number | '' | string): number => {
     if (typeof h === "number") return Number.isFinite(h) ? h : NaN;
     if (h === "") return NaN;
@@ -122,21 +150,80 @@ export default function App() {
   const [includeNews, setIncludeNews] = useState(false);
   const [xHandles, setXHandles] = useState("");
 
-  const [isTraining, setIsTraining] = useState(false);
-  const [isPredicting, setIsPredicting] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [logMessages, setLogMessages] = useState<string[]>([]);
-  const [drivers, setDrivers] = useState<{ feature: string; weight: number }[]>([]);
-  const [probUp, setProbUp] = useState(0);
-  const [probUpNext, setProbUpNext] = useState<number | null>(null);
-  const [art, setArt] = useState<MCArtifact | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [recentRuns, setRecentRuns] = useState<RunSummary[]>([]);
+  const polygonKey = useMemo(() => {
+    const envMap = (import.meta as any)?.env ?? {};
+    const candidates = [
+      typeof window !== "undefined" ? window.localStorage?.getItem("polygon_api_key") : undefined,
+      envMap?.VITE_POLYGON_API_KEY,
+      envMap?.VITE_POLYGON_KEY,
+      DEFAULT_POLYGON_API_KEY,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const trimmed = candidate.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return "";
+  }, []);
+  const hasPolygonKey = useMemo(() => polygonKey.trim().length > 0, [polygonKey]);
+
+  const {
+    isTraining,
+    isPredicting,
+    isSimulating,
+    logMessages,
+    progress,
+    drivers,
+    probUp,
+    probUpNext,
+    art,
+    currentPrice,
+    runId,
+    recentRuns,
+    setRecentRuns,
+    runPredict,
+    runSimulation,
+  } = sim;
+
+  const authHeaders = useMemo(() => getAuthHeaders(), [getAuthHeaders]);
+
+  const handlePredict = useCallback(() => {
+    runPredict({ symbol, horizonDays: coerceDays(horizon) });
+  }, [runPredict, symbol, horizon]);
+
+  const handleSimulation = useCallback(
+    (mode: SimMode) => {
+      runSimulation({
+        mode,
+        symbol,
+        horizonDays: coerceDays(horizon),
+        nPaths: paths,
+        includeNews,
+        includeOptions,
+        includeFutures,
+        xHandles,
+      });
+    },
+    [
+      runSimulation,
+      symbol,
+      horizon,
+      paths,
+      includeNews,
+      includeOptions,
+      includeFutures,
+      xHandles,
+    ]
+  );
 
   const logRef = useRef<HTMLDivElement | null>(null);
-  const sseAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      sim.abortStream();
+    };
+  }, [sim.abortStream]);
 
   // Focus overlay for charts (no layout shift)
   type FocusKey = null | "fan" | "terminal" | "drivers" | "scenarios";
@@ -152,15 +239,9 @@ export default function App() {
   // Session cookie bootstrap
   useEffect(() => { fetch(api("/session/anon"), { method: "POST", credentials: "include" }).catch(() => {}); }, []);
 
-  const throttledLog = useMemo(() => throttle((m: string) => {
-    setLogMessages((prev) => (prev[prev.length - 1] === m ? prev : prev.length >= 50 ? [...prev.slice(1), m] : [...prev, m]));
-  }, 120), []);
-  const throttledProgress = useMemo(() => throttle((p: number) => setProgress(p), 100), []);
-
   // News
-  const getAuthHeaders = useCallback(() => apiHeaders(), []);
   const { items: newsItemsRaw, nextCursor, loading: newsLoading, error: newsError, loadMore } = useNews({
-    symbol, includeNews, limit: 6, days: 7, retry: 0, apiBase: API_BASE, getHeaders: getAuthHeaders, onLog: throttledLog,
+    symbol, includeNews, limit: 6, days: 7, retry: 0, apiBase: API_BASE, getHeaders: getAuthHeaders, onLog: sim.throttledLog,
   });
   const newsItems = useMemo(() => (Array.isArray(newsItemsRaw) ? newsItemsRaw : []), [newsItemsRaw]);
 
@@ -174,6 +255,135 @@ export default function App() {
 
   const fmtPct = (x: number | undefined | null) => (Number.isFinite(x) ? (x as number) : 0).toLocaleString(undefined, { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1, });
   const eod = art?.eod_estimate ?? null;
+  const diagnostics = useMemo(() => {
+    const raw = art?.diagnostics as DiagnosticsSnapshot | null | undefined;
+    if (!raw) return null;
+    const toNum = (val: unknown): number | null => {
+      const num = typeof val === "string" ? Number(val) : val;
+      return typeof num === "number" && Number.isFinite(num) ? num : null;
+    };
+    const maybeMu = (raw?.mu ?? null) as any;
+    const maybeSigma = (raw?.sigma ?? null) as any;
+    const muPre = toNum(maybeMu?.pre ?? raw?.mu_pre ?? maybeMu?.before ?? (raw as any)?.mu_before);
+    const muPost = toNum(maybeMu?.post ?? raw?.mu_post ?? maybeMu?.after ?? (raw as any)?.mu_after);
+    const sigmaPre = toNum(maybeSigma?.pre ?? raw?.sigma_pre ?? maybeSigma?.before ?? (raw as any)?.sigma_before);
+    const sigmaPost = toNum(maybeSigma?.post ?? raw?.sigma_post ?? maybeSigma?.after ?? (raw as any)?.sigma_after);
+    const context = (raw?.context ?? {}) as Record<string, unknown>;
+    const sentimentSrc = (raw?.sentiment ?? context?.sentiment) as Record<string, unknown> | undefined;
+    const earningsSrc = (raw?.earnings ?? context?.earnings) as Record<string, unknown> | undefined;
+    const macroSrc = (raw?.macro ?? context?.macro) as Record<string, unknown> | undefined;
+    const regimeSrc = (raw?.regime ?? context?.regime) as Record<string, unknown> | undefined;
+    const schedulerSrc = (raw?.scheduler ?? context?.scheduler) as Record<string, unknown> | undefined;
+
+    const sentimentAvg7d = toNum(
+      sentimentSrc?.avg_sent_7d ?? sentimentSrc?.avg7d ?? sentimentSrc?.avg ?? sentimentSrc?.avg_7d
+    );
+    const sentiment24h = toNum(
+      sentimentSrc?.avg_sent_last24h ?? sentimentSrc?.last24h ?? sentimentSrc?.day ?? sentimentSrc?.last_24h
+    );
+    const sentimentDelta =
+      typeof sentimentAvg7d === "number" && typeof sentiment24h === "number"
+        ? sentiment24h - sentimentAvg7d
+        : null;
+
+    const earningsSurprise = toNum(
+      earningsSrc?.surprise_pct ??
+        earningsSrc?.surprise_percent ??
+        earningsSrc?.surprise ??
+        earningsSrc?.last_surprise_pct
+    );
+    const earningsDaysSince = toNum(
+      earningsSrc?.days_since ?? earningsSrc?.days ?? earningsSrc?.last_days ?? earningsSrc?.last_event_days_ago
+    );
+
+    const macroRff = toNum(macroSrc?.rff);
+    const macroCpi = toNum(macroSrc?.cpi_yoy ?? macroSrc?.cpi);
+    const macroURate = toNum(macroSrc?.u_rate ?? macroSrc?.unemployment);
+    const macroUpdatedAt =
+      typeof macroSrc?.updated_at === "string" && macroSrc.updated_at.trim()
+        ? macroSrc.updated_at.trim()
+        : undefined;
+
+    const regimeName =
+      typeof regimeSrc?.name === "string" && regimeSrc.name.trim() ? regimeSrc.name.trim() : undefined;
+    const regimeScore = toNum(regimeSrc?.score);
+
+    const schedulerTimestamps: Array<{ label: string; iso: string }> = [];
+    const pushTimestamp = (label: string, value: unknown) => {
+      if (typeof value === "string" && value.trim()) {
+        schedulerTimestamps.push({ label, iso: value.trim() });
+      }
+    };
+    if (schedulerSrc && typeof schedulerSrc === "object") {
+      const sched: any = schedulerSrc;
+      pushTimestamp("news", sched.news_fetch_ts ?? sched.news_ts ?? sched.news_timestamp ?? sched.news?.ts);
+      pushTimestamp(
+        "earnings",
+        sched.earnings_fetch_ts ?? sched.earnings_ts ?? sched.earnings_timestamp ?? sched.earnings?.ts
+      );
+      pushTimestamp(
+        "macro",
+        sched.macro_fetch_ts ?? sched.macro_ts ?? sched.macro_timestamp ?? sched.macro?.ts ?? macroUpdatedAt
+      );
+    } else if (macroUpdatedAt) {
+      pushTimestamp("macro", macroUpdatedAt);
+    }
+
+    const scheduler = schedulerTimestamps.length ? schedulerTimestamps : null;
+
+    const hasAny =
+      [muPre, muPost, sigmaPre, sigmaPost, sentimentAvg7d, sentiment24h, earningsSurprise, earningsDaysSince, macroRff, macroCpi, macroURate].some(
+        (v) => typeof v === "number" && Number.isFinite(v)
+      ) || !!regimeName || typeof regimeScore === "number" || (scheduler?.length ?? 0) > 0;
+
+    if (!hasAny) return null;
+
+    return {
+      muPre,
+      muPost,
+      sigmaPre,
+      sigmaPost,
+      sentiment:
+        typeof sentimentAvg7d === "number" || typeof sentiment24h === "number"
+          ? { avg7d: sentimentAvg7d ?? null, last24h: sentiment24h ?? null, delta: sentimentDelta }
+          : null,
+      earnings:
+        typeof earningsSurprise === "number" || typeof earningsDaysSince === "number"
+          ? { surprise: earningsSurprise ?? null, daysSince: earningsDaysSince ?? null }
+          : null,
+      macro:
+        typeof macroRff === "number" || typeof macroCpi === "number" || typeof macroURate === "number"
+          ? { rff: macroRff ?? null, cpi: macroCpi ?? null, uRate: macroURate ?? null, updatedAt: macroUpdatedAt }
+          : macroUpdatedAt
+            ? { rff: null, cpi: null, uRate: null, updatedAt: macroUpdatedAt }
+          : null,
+      regime:
+        regimeName || typeof regimeScore === "number"
+          ? { name: regimeName ?? null, score: regimeScore ?? null }
+          : null,
+      scheduler,
+    };
+  }, [art?.diagnostics]);
+  const fmtDiag = (value: number | null | undefined) =>
+    typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "-";
+  const fmtDiagPercent = (value: number | null | undefined, digits = 1) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+    const scaled = Math.abs(value) <= 1 ? value * 100 : value;
+    return `${scaled >= 0 ? "+" : ""}${scaled.toFixed(digits)}%`;
+  };
+  const fmtDiagDaysAgo = (value: number | null | undefined) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+    const rounded = Math.max(0, Math.round(value));
+    if (rounded === 0) return "today";
+    if (rounded === 1) return "1 day ago";
+    return `${rounded} days ago`;
+  };
+  const fmtDiagTimestamp = (value?: string | null) => {
+    if (!value || typeof value !== "string") return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleString();
+  };
 
   // Export & share
   const exportChart = async (chartId: "fan" | "terminal" | "drivers" | "ladder") => {
@@ -219,211 +429,6 @@ export default function App() {
     navigator.clipboard.writeText(url); toast.success("Shareable link copied.");
   };
 
-  // Backend calls
-  const clampLookback = (days: number) => {
-    const d = Math.floor(Number(days));
-    if (!Number.isFinite(d) || d <= 0) return DEEP_LOOKBACK_DAYS;
-    return Math.max(30, Math.min(d, DEEP_LOOKBACK_DAYS));
-  };
-
-  type TrainOptions = {
-    lookbackDays?: number;
-    label?: string;
-  };
-
-  async function trainModel(options: TrainOptions = {}): Promise<boolean> {
-    const lookbackDays = clampLookback(options.lookbackDays ?? DEEP_LOOKBACK_DAYS);
-    const actionLabel =
-      options.label ?? `${symbol.toUpperCase()}: training (${lookbackDays}d history)`;
-    setIsTraining(true);
-    throttledLog(`${actionLabel}...`);
-    try {
-      const resp = await fetch(api("/train"), {
-        method: "POST",
-        credentials: "include",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), lookback_days: lookbackDays }),
-      });
-      const text = await safeText(resp);
-      if (!resp.ok) {
-        if (looksLikeHTML(text)) throw new Error("Misrouted to HTML. Check API base.");
-        throw new Error(`Train failed: ${resp.status} - ${text}`);
-      }
-      throttledLog(`${actionLabel} complete.`);
-      return true;
-    } catch (e: any) {
-      throttledLog(`Training error: ${e?.message || e}`);
-      return false;
-    } finally {
-      setIsTraining(false);
-    }
-  }
-
-  async function runPredict() {
-    const h = coerceDays(horizon);
-    if (!Number.isFinite(h) || h < 1) { throttledLog("Error: Please enter a horizon (days)."); return; }
-    if (h > 365) { throttledLog("Error: Predict horizon must be <= 365 days."); return; }
-    throttledLog(`Running prediction... [${symbol.toUpperCase()} H${h}]`);
-    setIsPredicting(true);
-    try {
-      const resp = await fetch(api("/predict"), {
-        method: "POST",
-        credentials: "include",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), horizon_days: h }),
-      });
-      const text = await safeText(resp);
-      if (!resp.ok) {
-        if (looksLikeHTML(text)) throw new Error("Misrouted to HTML. Check API base.");
-        throw new Error(`Predict failed: ${resp.status} - ${text}`);
-      }
-      const js = JSON.parse(text);
-      const pu = Number(js?.prob_up_next);
-      if (Number.isFinite(pu)) setProbUpNext(pu);
-      throttledLog(`Prediction: Prob Up Next = ${Number.isFinite(pu) ? (pu * 100).toFixed(2) : "?"}%`);
-    } catch (e: any) {
-      throttledLog(`Error: ${e.message || e}`);
-    } finally {
-      setIsPredicting(false);
-    }
-  }
-
-  async function runSimulation(mode: SimMode) {
-    const hNum = coerceDays(horizon);
-    if (!Number.isFinite(hNum) || hNum < 1) { throttledLog("Error: Please enter a horizon (days)."); return; }
-    if (hNum > 3650) { throttledLog("Error: Horizon must be <= 3650 days (10 years)."); return; }
-    const pNum = Math.max(100, Math.min(Number(paths) || 2000, 10000));
-    if (isTraining) {
-      throttledLog("Training already in progress. Please wait for it to finish before running a simulation.");
-      return;
-    }
-
-    setIsSimulating(true);
-    setLogMessages([]);
-    setArt(null);
-    setProgress(0);
-    setDrivers([]);
-    setProbUp(0);
-    setCurrentPrice(null);
-    setRunId(null);
-    setProbUpNext(null);
-    try {
-      const lookbackDays = mode === "deep" ? DEEP_LOOKBACK_DAYS : QUICK_LOOKBACK_DAYS;
-      const trained = await trainModel({
-        lookbackDays,
-        label:
-          mode === "deep"
-            ? `${symbol.toUpperCase()}: deep training (${lookbackDays}d history)`
-            : `${symbol.toUpperCase()}: quick warm-up (${lookbackDays}d history)`,
-      });
-      if (!trained) {
-        throttledLog("Simulation aborted because training failed.");
-        setIsSimulating(false);
-        return;
-      }
-
-      const payload: any = {
-        mode,
-        symbol: symbol.toUpperCase(),
-        horizon_days: Number(hNum),
-        n_paths: Number(pNum),
-        timespan: "day",
-        include_news: !!includeNews,
-        include_options: !!includeOptions,
-        include_futures: !!includeFutures,
-        ...(xHandles.trim() ? { x_handles: xHandles.trim() } : {}),
-      };
-      const start = await fetch(api("/simulate"), {
-        method: "POST",
-        credentials: "include",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
-      const startTxt = await safeText(start);
-      if (!start.ok) {
-        if (looksLikeHTML(startTxt)) throw new Error("Misrouted to HTML. Check API base.");
-        throw new Error(`HTTP ${start.status} - ${startTxt}`);
-      }
-      const { run_id } = JSON.parse(startTxt);
-      setRunId(run_id);
-      throttledLog(`Queued run_id: ${run_id} [${mode.toUpperCase()}]`);
-
-      try { sseAbortRef.current?.abort(); } catch {}
-      sseAbortRef.current = new AbortController();
-      try {
-        await fetchEventSource(api(`/simulate/${run_id}/stream`), {
-          headers: getAuthHeaders(),
-          signal: sseAbortRef.current.signal,
-          openWhenHidden: true,
-          // @ts-ignore
-          retry: 0,
-          onopen: async (r) => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            throttledLog("Connected to stream");
-          },
-          onmessage: (ev) => {
-            try {
-              const d = JSON.parse(ev.data);
-              if (typeof d.status === "string") {
-                const p = typeof d.progress === "number" ? d.progress : 0;
-                throttledProgress(p);
-                throttledLog(`Status: ${d.status} | Progress: ${Math.round(p)}%`);
-              }
-            } catch {}
-          },
-          onerror: (err) => {
-            throttledLog(`Stream error: ${err?.message || err}. Ending stream...`);
-            try { sseAbortRef.current?.abort(); } catch {}
-          },
-          onclose: () => throttledLog("Stream closed."),
-        });
-      } catch (e: any) {
-        throttledLog(`Stream failed: ${e?.message || e}. Continuing...`);
-      } finally {
-        try { sseAbortRef.current?.abort(); } catch {}
-        sseAbortRef.current = null;
-      }
-
-      const artifactResp = await fetch(api(`/simulate/${run_id}/artifact`), { headers: getAuthHeaders() });
-      const artTxt = await safeText(artifactResp);
-      if (!artifactResp.ok) {
-        if (looksLikeHTML(artTxt)) throw new Error("Misrouted to HTML. Check API base.");
-        throw new Error(`Artifact fetch failed: ${artifactResp.status} - ${artTxt}`);
-      }
-      const artf: MCArtifact = JSON.parse(artTxt);
-      setArt(artf);
-      setDrivers(artf.drivers || []);
-      setProbUp(artf.prob_up_end || 0);
-      setCurrentPrice((artf as any).spot ?? artf.median_path?.[0]?.[1] ?? null);
-      const puNext = Number((artf as any)?.prob_up_next);
-      if (Number.isFinite(puNext)) setProbUpNext(puNext);
-      try {
-        if (artf && run_id) { fetch(api(`/runs/${run_id}/summary`)).catch(() => {}); }
-      } catch {}
-
-      const terminalPoint = Array.isArray(artf.median_path) && artf.median_path.length
-        ? artf.median_path[artf.median_path.length - 1]?.[1]
-        : null;
-      const summary: RunSummary = {
-        id: run_id,
-        symbol: artf.symbol || symbol.toUpperCase(),
-        horizon: Number(artf.horizon_days ?? hNum) || Number(hNum),
-        n_paths: Number((artf as any)?.n_paths ?? pNum) || Number(pNum),
-        finishedAt: new Date().toISOString(),
-        probUp: typeof artf.prob_up_end === "number" ? artf.prob_up_end : null,
-        q50: typeof terminalPoint === "number" && Number.isFinite(terminalPoint) ? terminalPoint : null,
-      };
-      setRecentRuns((prev) => {
-        const filtered = prev.filter((r) => r.id !== summary.id);
-        return [summary, ...filtered].slice(0, 8);
-      });
-    } catch (e: any) {
-      throttledLog(`Error: ${e.message ?? e}`);
-    } finally {
-      setIsSimulating(false);
-    }
-  }
-
   // Derived KPIs
   const kpiMedianDeltaPct = (() => {
     if (!art) return null; const s0 = art.median_path?.[0]?.[1] ?? 0; const sH = art.median_path?.at(-1)?.[1] ?? 0;
@@ -467,7 +472,7 @@ export default function App() {
   }, [art, currentPrice]);
 
   const loadRunConfig = useCallback(
-    (run: RunSummary) => {
+    (run: { symbol: string; horizon: number; n_paths: number }) => {
       setSymbol(run.symbol);
       setHorizon(run.horizon);
       setPaths(run.n_paths);
@@ -484,6 +489,27 @@ export default function App() {
         onClick: () => loadRunConfig(run),
       })),
     [recentRuns, loadRunConfig]
+  );
+
+  const trackRuns = useMemo<RunRow[]>(
+    () =>
+      recentRuns.map((run) => ({
+        id: run.id,
+        symbol: run.symbol,
+        horizon: run.horizon,
+        n_paths: run.n_paths,
+        q50: typeof run.q50 === "number" ? run.q50 : undefined,
+        probUp: typeof run.probUp === "number" ? run.probUp : undefined,
+        finishedAt: run.finishedAt,
+      })),
+    [recentRuns]
+  );
+
+  const handleTrackRowClick = useCallback(
+    (row: RunRow) => {
+      loadRunConfig(row);
+    },
+    [loadRunConfig]
   );
 
   const navItems = DASHBOARD_NAV;
@@ -522,13 +548,13 @@ export default function App() {
               q50: Number.isFinite(Number(q50Raw)) ? Number(q50Raw) : null,
             };
           })
-          .filter((r): r is RunSummary => !!r);
+          .filter((r: RunSummary | null): r is RunSummary => r !== null);
         if (!cancelled && normalized.length) {
           setRecentRuns(normalized);
         }
       } catch (err: any) {
         if (!cancelled) {
-          throttledLog(`Recent runs error: ${err?.message || err}`);
+          sim.throttledLog(`Recent runs error: ${err?.message || err}`);
         }
       }
     };
@@ -536,7 +562,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [api, getAuthHeaders, throttledLog]);
+  }, [api, getAuthHeaders, setRecentRuns, sim.throttledLog]);
 
   // -- render --
   return (
@@ -637,112 +663,124 @@ export default function App() {
             </section>
 
             <section id="simulation" className="space-y-6">
-              <Card id="controls-card" title="Simulation Controls">
-                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <Field label="Ticker / Symbol">
-                    <input
-                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                      value={symbol}
-                      onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                      placeholder="e.g., NVDA"
-                    />
-                  </Field>
-                  <Field label="Horizon (days)">
-                    <input
-                      type="number"
-                      min={1}
-                      max={3650}
-                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                      value={horizon}
-                      onChange={(e) => {
-                        const v = e.currentTarget.value;
-                        if (v === "") return setHorizon("");
-                        const n = e.currentTarget.valueAsNumber;
-                        setHorizon(Number.isFinite(n) ? n : "");
-                      }}
-                      placeholder="30"
-                    />
-                  </Field>
-                  <Field label="Paths">
-                    <input
-                      type="number"
-                      min={100}
-                      step={100}
-                      className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                      value={paths}
-                      onChange={(e) => {
-                        const v = e.currentTarget.valueAsNumber;
-                        setPaths(Number.isFinite(v) ? v : paths);
-                      }}
-                      placeholder="2000"
-                    />
-                  </Field>
-                  <div className="col-span-2 lg:col-span-4">
-                    <Field label="X (Twitter) handles - optional">
+              <ContextRibbon symbol={symbol} />
+              <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
+                <Card id="controls-card" title="Simulation Controls">
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    <Field label="Ticker / Symbol">
+                      <TickerAutocomplete
+                        value={symbol}
+                        onChange={setSymbol}
+                        apiKey={hasPolygonKey ? polygonKey : undefined}
+                        placeholder="e.g., NVDA"
+                      />
+                      {!hasPolygonKey && (
+                        <p className="mt-1 text-[11px] text-white/50">
+                          Provide a Polygon API key to enable live ticker search suggestions.
+                        </p>
+                      )}
+                    </Field>
+                    <Field label="Horizon (days)">
                       <input
+                        type="number"
+                        min={1}
+                        max={3650}
                         className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={xHandles}
-                        onChange={(e) => setXHandles(e.target.value)}
-                        placeholder="comma,separated,handles"
+                        value={horizon}
+                        onChange={(e) => {
+                          const v = e.currentTarget.value;
+                          if (v === "") return setHorizon("");
+                          const n = e.currentTarget.valueAsNumber;
+                          setHorizon(Number.isFinite(n) ? n : "");
+                        }}
+                        placeholder="30"
                       />
                     </Field>
+                    <Field label="Paths">
+                      <input
+                        type="number"
+                        min={100}
+                        step={100}
+                        className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                        value={paths}
+                        onChange={(e) => {
+                          const v = e.currentTarget.valueAsNumber;
+                          setPaths(Number.isFinite(v) ? v : paths);
+                        }}
+                        placeholder="2000"
+                      />
+                    </Field>
+                    <div className="col-span-2 lg:col-span-4">
+                      <Field label="X (Twitter) handles - optional">
+                        <input
+                          className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                          value={xHandles}
+                          onChange={(e) => setXHandles(e.target.value)}
+                          placeholder="comma,separated,handles"
+                        />
+                      </Field>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={includeOptions}
+                        onChange={(e) => setIncludeOptions(e.target.checked)}
+                      />
+                      Include options
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={includeFutures}
+                        onChange={(e) => setIncludeFutures(e.target.checked)}
+                      />
+                      Include futures
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={includeNews}
+                        onChange={(e) => setIncludeNews(e.target.checked)}
+                      />
+                      Include news
+                    </label>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={includeOptions}
-                      onChange={(e) => setIncludeOptions(e.target.checked)}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                    <LoadingButton
+                      label="Quick Sim"
+                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
+                      loading={isSimulating}
+                      onClick={() => !isSimulating && handleSimulation("quick")}
+                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
                     />
-                    Include options
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={includeFutures}
-                      onChange={(e) => setIncludeFutures(e.target.checked)}
+                    <LoadingButton
+                      label="Deep Sim"
+                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
+                      loading={isSimulating}
+                      onClick={() => !isSimulating && handleSimulation("deep")}
+                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
                     />
-                    Include futures
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={includeNews}
-                      onChange={(e) => setIncludeNews(e.target.checked)}
+                    <LoadingButton
+                      label="Predict"
+                      loadingLabel="Predicting..."
+                      loading={isPredicting}
+                      onClick={handlePredict}
+                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
                     />
-                    Include news
-                  </label>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <LoadingButton
-                    label="Quick Sim"
-                    loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                    loading={isSimulating}
-                    onClick={() => !isSimulating && runSimulation("quick")}
-                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                  />
-                  <LoadingButton
-                    label="Deep Sim"
-                    loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                    loading={isSimulating}
-                    onClick={() => !isSimulating && runSimulation("deep")}
-                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                  />
-                  <LoadingButton
-                    label="Predict"
-                    loadingLabel="Predicting..."
-                    loading={isPredicting}
-                    onClick={runPredict}
-                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                  />
-                  <LoadingButton
-                    label="Train Model"
-                    loadingLabel="Training..."
-                    loading={isTraining}
-                    onClick={() => { void trainModel({ lookbackDays: DEEP_LOOKBACK_DAYS }); }}
-                    className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                  />
-                </div>
-              </Card>
+                  </div>
+                </Card>
+
+                <Card id="activity-log" title="Activity Log">
+                  <div
+                    ref={logRef}
+                    className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs text-white/80`}
+                  >
+                    {(Array.isArray(logMessages) ? logMessages : []).map((m, i) => (
+                      <div key={i}>{String(m ?? "")}</div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
 
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
                 <Card
@@ -769,6 +807,115 @@ export default function App() {
                         )}
                       </Suspense>
                     </EB>
+                    {diagnostics && (
+                      <details className="mt-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/70">
+                        <summary className="cursor-pointer text-sm font-semibold text-white/80">
+                          Diagnostics
+                        </summary>
+                        <div className="mt-2 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-white/60">mu</span>
+                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
+                              <span>pre {fmtDiag(diagnostics.muPre)}</span>
+                              <span className="text-white/60">post {fmtDiag(diagnostics.muPost)}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-white/60">sigma</span>
+                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
+                              <span>pre {fmtDiag(diagnostics.sigmaPre)}</span>
+                              <span className="text-white/60">post {fmtDiag(diagnostics.sigmaPost)}</span>
+                            </div>
+                          </div>
+                          {diagnostics.regime && (
+                            <div className="flex flex-wrap items-center gap-2 text-white/70">
+                              <span className="text-white/60">Regime</span>
+                              <span className="rounded-full border border-white/15 px-2 py-0.5">
+                                {diagnostics.regime.name ?? "-"}
+                              </span>
+                              {typeof diagnostics.regime.score === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5">
+                                  {fmtDiagPercent(diagnostics.regime.score, 0)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {diagnostics.sentiment && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-white/60">Sentiment</span>
+                              {typeof diagnostics.sentiment.avg7d === "number" && (
+                                <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-emerald-200">
+                                  7d {fmtDiagPercent(diagnostics.sentiment.avg7d)}
+                                </span>
+                              )}
+                              {typeof diagnostics.sentiment.last24h === "number" && (
+                                <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-sky-200">
+                                  24h {fmtDiagPercent(diagnostics.sentiment.last24h)}
+                                </span>
+                              )}
+                              {typeof diagnostics.sentiment.delta === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                                  delta {fmtDiagPercent(diagnostics.sentiment.delta)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {diagnostics.earnings && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-white/60">Earnings</span>
+                              {typeof diagnostics.earnings.surprise === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                                  surprise {fmtDiagPercent(diagnostics.earnings.surprise)}
+                                </span>
+                              )}
+                              {typeof diagnostics.earnings.daysSince === "number" && (
+                                <span className="rounded-full border border-white/15 px-2 py-0.5 text-white/70">
+                                  {fmtDiagDaysAgo(diagnostics.earnings.daysSince)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {diagnostics.macro && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-white/60">Macro</span>
+                              {typeof diagnostics.macro.rff === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                                  RFF {fmtDiagPercent(diagnostics.macro.rff, 2)}
+                                </span>
+                              )}
+                              {typeof diagnostics.macro.cpi === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                                  CPI {fmtDiagPercent(diagnostics.macro.cpi, 1)}
+                                </span>
+                              )}
+                              {typeof diagnostics.macro.uRate === "number" && (
+                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                                  U {fmtDiagPercent(diagnostics.macro.uRate, 1)}
+                                </span>
+                              )}
+                              {diagnostics.macro.updatedAt && (
+                                <span className="rounded-full border border-white/15 px-2 py-0.5 text-white/60">
+                                  {fmtDiagTimestamp(diagnostics.macro.updatedAt) ?? diagnostics.macro.updatedAt}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {diagnostics.scheduler && diagnostics.scheduler.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-2 text-white/60">
+                              <span className="text-white/60">Scheduler</span>
+                              {diagnostics.scheduler.map((entry) => (
+                                <span
+                                  key={`${entry.label}-${entry.iso}`}
+                                  className="rounded-full border border-white/15 px-2 py-0.5"
+                                >
+                                  {entry.label}: {fmtDiagTimestamp(entry.iso) ?? entry.iso}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
                     {art && (
                       <div className="mt-2">
                         <InlineLegend />
@@ -873,18 +1020,6 @@ export default function App() {
                     </Suspense>
                   </EB>
                 </Card>
-
-                <Card id="activity-log" title="Activity Log">
-                  <div
-                    ref={logRef}
-                    className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs text-white/80`}
-                  >
-                    {(Array.isArray(logMessages) ? logMessages : []).map((m, i) => (
-                      <div key={i}>{String(m ?? "")}</div>
-                    ))}
-                  </div>
-                </Card>
-
                 <Card id="news" className="lg:col-span-2">
                   <EB>
                     {includeNews ? (
@@ -910,7 +1045,7 @@ export default function App() {
                 <Card id="simetrix-ai">
                   <div className="mb-2 text-sm text-white/60">Simetrix AI</div>
                   {runId ? (
-                    <SimSummaryCard apiBase={API_BASE} runId={runId} />
+                    <SimSummaryCard apiBase={API_BASE} runId={runId} headers={authHeaders} />
                   ) : (
                     <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
                       Powered by xAI.
@@ -922,7 +1057,7 @@ export default function App() {
 
             <section id="track-record">
               <EB>
-                <TrackRecordPanel runs={recentRuns} onRowClick={loadRunConfig} />
+                <TrackRecordPanel runs={trackRuns} onRowClick={handleTrackRowClick} />
               </EB>
             </section>
 

@@ -1,0 +1,222 @@
+<!--
+Market Twin — Report UI (frontend)
+
+Drop these files into your repo (search for ==== FILE: markers to split):
+
+- market_twin/dashboard/templates/reports.html       → Standalone UI that works right away
+- market_twin/dashboard/routes/reports_ui.py         → FastAPI router to serve the UI
+- market_twin/reports/generator.py (patch)           → Provider hook to wire real data sources
+- market_twin/analytics/providers.py (new, optional) → Implement real data adapters here
+
+After adding, visit: http://127.0.0.1:8000/ui/reports
+-->
+
+
+<!-- ==== FILE: market_twin/dashboard/templates/reports.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Market Twin — Reports</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-2xl font-semibold">Market Twin — Generate Report</h1>
+      <p class="text-sm text-slate-500">On‑demand, non‑blocking report builder. Uses <code>/reports/generate</code> under the hood.</p>
+    </header>
+
+    <form id="report-form" class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white rounded-2xl shadow p-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">Report type</label>
+        <select id="rtype" class="w-full rounded-xl border px-3 py-2">
+          <option value="full">Full (recommended)</option>
+          <option value="portfolio">Portfolio</option>
+          <option value="sentiment">Sentiment</option>
+          <option value="catalysts">Catalysts</option>
+          <option value="backtest">Backtest</option>
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium mb-1">Export format</label>
+        <select id="fmt" class="w-full rounded-xl border px-3 py-2">
+          <option value="json">JSON</option>
+          <option value="csv">CSV</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <p class="text-xs text-slate-500 mt-1">PDF requires <code>reportlab</code>. Falls back to JSON if missing.</p>
+      </div>
+
+      <div class="md:col-span-2">
+        <label class="block text-sm font-medium mb-1">Tickers (comma‑separated)</label>
+        <input id="tickers" placeholder="e.g. RIOT, NIO, CYBN" class="w-full rounded-xl border px-3 py-2" />
+        <p class="text-xs text-slate-500 mt-1">Leave blank to include your full tracked set.</p>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium mb-1">Preset range</label>
+        <select id="preset" class="w-full rounded-xl border px-3 py-2">
+          <option value="today">Today</option>
+          <option value="7d" selected>Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="open">Since market open</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <label class="block text-sm font-medium">Include raw blobs</label>
+        <input id="include_raw" type="checkbox" class="h-5 w-5"/>
+      </div>
+
+      <div id="custom-dates" class="md:col-span-2 hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">From</label>
+          <input id="date_from" type="datetime-local" class="w-full rounded-xl border px-3 py-2"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">To</label>
+          <input id="date_to" type="datetime-local" class="w-full rounded-xl border px-3 py-2"/>
+        </div>
+      </div>
+
+      <div class="md:col-span-2 flex items-center gap-3">
+        <button id="generate" type="submit" class="rounded-2xl px-4 py-2 bg-slate-900 text-white disabled:opacity-50">Generate report</button>
+        <a id="download-last" class="text-sm text-blue-600 hidden" href="#">Download last</a>
+        <span id="status" class="text-sm text-slate-500"></span>
+      </div>
+    </form>
+
+    <section class="mt-6 bg-white shadow rounded-2xl p-4">
+      <h2 class="font-medium mb-2">Tips</h2>
+      <ul class="text-sm list-disc ml-5 space-y-1 text-slate-600">
+        <li>Use presets for speed. Switch to <em>Custom…</em> to set exact timestamps.</li>
+        <li>Comma‑separate tickers to subset your universe: <code>RIOT, NIO, CYBN</code>.</li>
+        <li>CSV is great for spreadsheets; JSON for pipelines; PDF for investor‑friendly snapshots.</li>
+      </ul>
+    </section>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const status = el('status');
+    const presetSel = el('preset');
+    const customDates = el('custom-dates');
+
+    function toLocalISO(dt){
+      // returns ISO8601 with local offset, e.g. 2025-09-10T07:30:00-06:00
+      const pad = (n) => String(n).padStart(2,'0');
+      const tz = -dt.getTimezoneOffset();
+      const sign = tz >= 0 ? '+' : '-';
+      const hh = pad(Math.floor(Math.abs(tz)/60));
+      const mm = pad(Math.abs(tz)%60);
+      return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}${sign}${hh}:${mm}`;
+    }
+
+    function marketOpenLocal(date){
+      // Approx US equities open 9:30 ET; convert to local clock of the browser
+      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      // Create 9:30 ET in UTC then shift to local; simple approximation
+      const etOffsetWinter = 300; // minutes
+      const etOffsetSummer = 240; // minutes (DST)
+      const jan = new Date(date.getFullYear(),0,1).getTimezoneOffset();
+      const jul = new Date(date.getFullYear(),6,1).getTimezoneOffset();
+      const etMinutes = (jan === jul ? etOffsetWinter : etOffsetSummer);
+      // 9:30 ET as minutes since UTC
+      const utcMinutes = (9*60 + 30) + etMinutes; // minutes ahead of UTC
+      const local = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0));
+      local.setUTCMinutes(utcMinutes);
+      return local;
+    }
+
+    presetSel.addEventListener('change', () => {
+      customDates.classList.toggle('hidden', presetSel.value !== 'custom');
+    });
+
+    function buildParams(){
+      const rtype = el('rtype').value;
+      const fmt = el('fmt').value;
+      const includeRaw = el('include_raw').checked;
+      const tickersRaw = el('tickers').value || '';
+      const params = new URLSearchParams();
+      params.set('rtype', rtype);
+      params.set('fmt', fmt);
+      if (includeRaw) params.set('include_raw','true');
+      // tickers
+      tickersRaw.split(',').map(t=>t.trim()).filter(Boolean).forEach(t => params.append('tickers', t));
+
+      let df = null, dt = new Date();
+      const now = new Date();
+      switch (presetSel.value){
+        case 'today':
+          df = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case '7d':
+          df = new Date(now.getTime() - 7*24*3600*1000);
+          break;
+        case '30d':
+          df = new Date(now.getTime() - 30*24*3600*1000);
+          break;
+        case 'open':
+          df = marketOpenLocal(now);
+          break;
+        case 'custom':
+          const dfInput = el('date_from').value;
+          const dtInput = el('date_to').value;
+          if (dfInput) df = new Date(dfInput);
+          if (dtInput) dt = new Date(dtInput);
+          break;
+      }
+      if (df) params.set('date_from', toLocalISO(df));
+      if (dt) params.set('date_to', toLocalISO(dt));
+
+      return params;
+    }
+
+    function filenameFromDisposition(dispo, fallbackExt){
+      if (!dispo) return `report.${fallbackExt}`;
+      const m = /filename\s*=\s*([^;]+)/i.exec(dispo);
+      if (!m) return `report.${fallbackExt}`;
+      return m[1].replace(/^\"|\"$/g,'');
+    }
+
+    function downloadBlob(blob, filename){
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
+      const last = document.getElementById('download-last');
+      last.classList.remove('hidden');
+      last.onclick = (e) => { e.preventDefault(); const a2 = document.createElement('a'); a2.href = url; a2.download = filename; document.body.appendChild(a2); a2.click(); a2.remove(); };
+    }
+
+    document.getElementById('report-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('generate');
+      btn.disabled = true; status.textContent = 'Generating…';
+      try{
+        const p = buildParams();
+        const fmt = p.get('fmt') || 'json';
+        const url = `/reports/generate?${p.toString()}`;
+        const res = await fetch(url);
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition');
+        const name = filenameFromDisposition(cd, fmt);
+        downloadBlob(blob, name);
+        status.textContent = 'Done';
+      }catch(err){
+        console.error(err);
+        status.textContent = `Error: ${err.message || err}`;
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+
+

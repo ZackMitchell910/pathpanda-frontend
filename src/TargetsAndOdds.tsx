@@ -50,8 +50,8 @@ export default function TargetsAndOdds({
               </tr>
             )}
 
-            {data.map((r, i) => (
-              <tr key={i} className="hover:bg-white/5">
+            {data.map((r) => (
+              <tr key={`${r.label}-${r.price}`} className="hover:bg-white/5">
                 <td className="py-2 pe-3 text-white/90 whitespace-nowrap">{r.label}</td>
                 <td className="py-2 pe-3 tabular-nums">${Number(r.price).toFixed(2)}</td>
                 <td className="py-2 pe-3 tabular-nums">

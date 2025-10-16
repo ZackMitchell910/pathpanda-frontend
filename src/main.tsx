@@ -10,6 +10,7 @@ import "./globals.css";
 import { inject } from '@vercel/analytics';
 import "chart.js/auto";
 import HowItWorksPage from "./HowItWorks";
+import MarketSimulatorComingSoon from "./pages/MarketSimulatorComingSoon";
 
 if (import.meta.env.PROD) {
   inject();
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<App />} />
         <Route path="/docs" element={<DocsPage />} />  
+        <Route path="/market-simulator" element={<MarketSimulatorComingSoon />} />
         <Route path="*" element={<Navigate to="/" replace />} />
         <Route path="/how-it-works" element={<HowItWorksPage />} />
       </Routes>

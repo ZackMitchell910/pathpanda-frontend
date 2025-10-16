@@ -11,6 +11,7 @@ import {
   Filler,
   CategoryScale,
 } from "chart.js";
+import type { ChartEvent, ActiveElement } from "chart.js";
 
 Chart.register(LinearScale, LineController, PointElement, LineElement, Tooltip, Filler, CategoryScale);
 
@@ -171,14 +172,26 @@ export default function HeroFanChart() {
           },
         },
         events: ["mousemove", "mouseout", "touchmove", "touchstart", "touchend"],
-        onHover: (_e, _el, chart) => {
+        onHover: (event: ChartEvent, _elements: ActiveElement[], chart) => {
           // Determine band under cursor by comparing distance to p80 vs p95 envelopes
           const { scales } = chart as any;
           const xScale = scales.x, yScale = scales.y;
-          const pos = _e.native;
-          if (!xScale || !yScale || !pos) return setHovered(null);
+          if (!xScale || !yScale) return setHovered(null);
 
-          const xVal = xScale.getValueForPixel(pos.x);
+          const native = event.native as MouseEvent | null;
+          if (!native) {
+            setHovered(null);
+            return;
+          }
+          const xPixel = native.offsetX ?? native.clientX;
+          const yPixel = native.offsetY ?? native.clientY;
+
+          if (typeof xPixel !== "number" || typeof yPixel !== "number") {
+            setHovered(null);
+            return;
+          }
+
+          const xVal = xScale.getValueForPixel(xPixel);
           if (xVal == null) return setHovered(null);
 
           // find nearest index
@@ -187,8 +200,7 @@ export default function HeroFanChart() {
             Math.min(data.xs.length - 1, Math.round(Number(xVal)))
           );
 
-          const yPx = pos.y;
-          const yVal = yScale.getValueForPixel(yPx);
+          const yVal = yScale.getValueForPixel(yPixel);
 
           const within95 =
             yVal <= data.upper95[idx] && yVal >= data.lower95[idx];

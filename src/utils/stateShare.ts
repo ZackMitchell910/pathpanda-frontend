@@ -3,6 +3,7 @@ export type SharedState = {
   horizon: number | "";
   paths: number;
   chartId?: string;
+  mode?: string;
 };
 
 export function encodeState(s: SharedState): string {
