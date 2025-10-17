@@ -57,7 +57,7 @@ export default function Landing() {
             transition={{ duration: 0.7, delay: 0.15 }}
             className="mt-4 max-w-3xl text-white/70"
           >
-            Simetrix runs Monte‑Carlo path ensembles, online learning, and quantum samplers to deliver daily
+            The Simetrix Quant Engine (SQE) runs proprietary path ensembles, online learning, and quantum samplers to deliver daily
             probability distributions, risk bands, and explainable drivers across assets.
           </motion.p>
 
@@ -103,7 +103,7 @@ export default function Landing() {
               <div className="flex items-center justify-between pb-2 text-xs text-white/60">
                 <div className="inline-flex items-center gap-2">
                   <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400/80" />
-                  Monte‑Carlo Fan Chart
+                  SQE Fan Chart
                 </div>
                 <div className="inline-flex items-center gap-3">
                   <span className="inline-flex items-center gap-1"><Cpu className="h-3.5 w-3.5"/> HPC</span>
@@ -217,7 +217,7 @@ function CredibilityStrip() {
 
 function KpiRow() {
   const KPIs = [
-    { label: "Paths / run", value: 1000000 },
+    { label: "Paths / run", value: 10000 },
     { label: "Symbols / day", value: 1200 },
     { label: "p95 latency", value: 380, suffix: "ms" },
   ];
@@ -336,10 +336,17 @@ function ProductsSection() {
   const products = [
     {
       name: "Simetrix Dash",
-      description: "Forecasting console for Monte Carlo simulations, drivers, and daily quant signals.",
+      description: "Forecasting console for Simetrix Quant Engine (SQE) simulations, drivers, and daily quant signals.",
       href: "/app",
       status: "Live",
       icon: LineChart,
+    },
+    {
+      name: "AI Trader",
+      description: "Live execution cockpit for automated strategies, guardrails, and post-trade analytics.",
+      href: "/trader",
+      status: "Alpha preview",
+      icon: BrainCircuit,
     },
     {
       name: "MarketSimulator",
@@ -353,7 +360,7 @@ function ProductsSection() {
   return (
     <section id="products" className="mx-auto max-w-7xl px-6 md:px-8 py-16 border-t border-white/10">
       <div className="mb-8 text-center">
-        <h2 className="font-brand text-2xl md:text-3xl">Products</h2>
+        <h2 className="font-brand text-2xl md:text-3xl">Platforms</h2>
         <p className="mt-2 text-white/60">Choose the workspace that fits your simulation workflow.</p>
       </div>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -498,3 +505,7 @@ function PricingSection() {
     </section>
   );
 }
+
+
+
+

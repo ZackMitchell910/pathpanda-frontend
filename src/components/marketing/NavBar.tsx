@@ -6,7 +6,10 @@ export default function NavBar() {
     ["Features", "/#features"],
     ["Pricing", "/#pricing"],
     ["Docs", "/docs"],
+    ["Trader Docs", "/docs/trader"],
+    ["Trader", "/trader"],
     ["Open Dashboard", "/app"],
+    ["Admin", "/admin"],
   ];
 
   return (
@@ -40,3 +43,4 @@ export default function NavBar() {
     </nav>
   );
 }
+

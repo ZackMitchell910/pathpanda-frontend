@@ -4,13 +4,16 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import Landing from "@/landing/Landing";
-import DocsPage from "./Docs";              // ← add
+import DocsPage from "./Docs";
 import "@/debug/hookGlobalErrors";
 import "./globals.css";
 import { inject } from '@vercel/analytics';
 import "chart.js/auto";
 import HowItWorksPage from "./HowItWorks";
 import MarketSimulatorComingSoon from "./pages/MarketSimulatorComingSoon";
+import AdminDashboard from "./pages/AdminDashboard";
+import TraderDashboard from "./pages/TraderDashboard";
+import TraderDocs from "./docs/TraderDocs";
 
 if (import.meta.env.PROD) {
   inject();
@@ -28,7 +31,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<App />} />
         <Route path="/docs" element={<DocsPage />} />  
+        <Route path="/docs/trader" element={<TraderDocs />} />
         <Route path="/market-simulator" element={<MarketSimulatorComingSoon />} />
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/trader" element={<TraderDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
         <Route path="/how-it-works" element={<HowItWorksPage />} />
       </Routes>
