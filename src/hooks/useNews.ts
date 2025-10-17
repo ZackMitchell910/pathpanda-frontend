@@ -1,6 +1,7 @@
 // src/hooks/useNews.ts
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveApiBase } from "@/utils/apiConfig";
+import type { SimetrixClient } from "@/api/simetrixClient";
 
 type NewsItem = {
   id: string;
@@ -22,6 +23,7 @@ type UseNewsArgs = {
   days?: number;
   onLog?: (m: string) => void;
   retry?: number;
+  client?: SimetrixClient;
 };
 
 const FALLBACK_API_BASE = "https://api.simetrix.io/";
@@ -37,6 +39,7 @@ export function useNews({
   days = 7,
   onLog,
   retry = 0,
+  client,
 }: UseNewsArgs) {
   const [items, setItems] = useState<NewsItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -73,27 +76,38 @@ export function useNews({
           const custom = typeof getHeaders === "function" ? getHeaders() : null;
           if (custom && typeof custom === "object") {
             headers = { ...headers, ...custom };
-          } else if (apiKey) {
-            headers = {
-              ...headers,
-              "Content-Type": "application/json",
-              "X-API-Key": apiKey,
-            };
-          } else {
-            headers = { ...headers, "Content-Type": "application/json" };
           }
         } catch (headerErr: any) {
           onLog?.(`News headers error: ${headerErr?.message || headerErr}`);
-          if (apiKey) {
-            headers = {
-              Accept: "application/json",
-              "Content-Type": "application/json",
-              "X-API-Key": apiKey,
-            };
-          }
         }
 
-        const r = await fetch(u.toString(), { headers });
+        const hasContentType = Object.keys(headers).some(
+          (key) => key.toLowerCase() === "content-type"
+        );
+        if (!hasContentType) {
+          headers = { ...headers, "Content-Type": "application/json" };
+        }
+
+        if (apiKey) {
+          headers = {
+            ...headers,
+            "X-Polygon-Key": apiKey,
+          };
+        } else if (
+          !Object.keys(headers).some((key) => key.toLowerCase() === "x-api-key") &&
+          !Object.keys(headers).some((key) => key.toLowerCase() === "x-polygon-key")
+        ) {
+          onLog?.("News fetch missing Polygon API key; requests may be rate limited or fail.");
+        }
+
+        const request = client
+          ? (path: string) => client.request(path, { headers })
+          : (path: string) =>
+              fetch(path, {
+                headers,
+                credentials: "include",
+              });
+        const r = await request(u.toString());
         const txt = await r.text().catch(() => "");
         if (!r.ok) {
           const msg = txt || `HTTP ${r.status}`;
@@ -121,7 +135,7 @@ export function useNews({
         setLoading(false);
       }
     },
-    [api, apiKey, canFetch, days, getHeaders, limit, onLog, retry, sym]
+    [api, apiKey, canFetch, client, days, getHeaders, limit, onLog, retry, sym]
   );
 
   // initial load when inputs change

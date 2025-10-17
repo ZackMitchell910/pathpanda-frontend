@@ -32,7 +32,7 @@ import { applyChartTheme } from "@/theme/chartTheme";
 import QuotaCard from "./components/QuotaCard";
 import ContextRibbon from "./components/ContextRibbon";
 import { resolveApiBase, resolveApiKey } from "@/utils/apiConfig";
-import { DashboardProvider, useDashboard } from "@/dashboard/DashboardProvider";
+import { DashboardProvider, useDashboard, useDashboardData } from "@/dashboard/DashboardProvider";
 import type { SimMode, MCArtifact, RunSummary } from "@/types/simulation";
 
 // Lazy charts
@@ -59,40 +59,6 @@ const DASHBOARD_NAV = [
 ] as const;
 
 // ---- Types ----
-type MaybeNumber = number | string | null | undefined;
-
-type DiagnosticsSnapshot = {
-  mu?: { pre?: number | null; post?: number | null } | null;
-  sigma?: { pre?: number | null; post?: number | null } | null;
-  mu_pre?: number | null;
-  mu_post?: number | null;
-  sigma_pre?: number | null;
-  sigma_post?: number | null;
-  sentiment?: {
-    avg_sent_7d?: MaybeNumber;
-    avg_sent_last24h?: MaybeNumber;
-    last24h?: MaybeNumber;
-    avg7d?: MaybeNumber;
-  } | null;
-  earnings?: {
-    surprise_pct?: MaybeNumber;
-    surprise_percent?: MaybeNumber;
-    surprise?: MaybeNumber;
-    days_since?: MaybeNumber;
-    last_days?: MaybeNumber;
-  } | null;
-  macro?: {
-    rff?: MaybeNumber;
-    cpi_yoy?: MaybeNumber;
-    u_rate?: MaybeNumber;
-    updated_at?: string | null;
-  } | null;
-  regime?: { name?: string | null; score?: MaybeNumber } | null;
-  scheduler?: Record<string, unknown> | null;
-  context?: Record<string, unknown> | null;
-  [key: string]: unknown;
-};
-
 const API_BASE = resolveApiBase();
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 
@@ -122,6 +88,15 @@ const Card: React.FC<{ id?: string; title?: string; actions?: React.ReactNode; c
 
 const EB: React.FC<React.PropsWithChildren> = ({ children }) => <ErrorBoundary>{children}</ErrorBoundary>;
 
+type DashboardCardConfig = {
+  id: string;
+  title?: string;
+  className?: string;
+  actions?: React.ReactNode;
+  content: React.ReactNode;
+  wrapper?: "card" | "component";
+};
+
 export default function App() {
   const getAuthHeaders = useCallback(() => apiHeaders(), []);
   return (
@@ -132,7 +107,7 @@ export default function App() {
 }
 
 function DashboardApp() {
-  const { sim, getAuthHeaders } = useDashboard();
+  const { sim, getAuthHeaders, client } = useDashboard();
   // --- helpers ---
   const LOG_HEIGHT = "h-48";
   const coerceDays = (h: number | '' | string): number => {
@@ -149,6 +124,12 @@ function DashboardApp() {
   const [includeFutures, setIncludeFutures] = useState(true);
   const [includeNews, setIncludeNews] = useState(false);
   const [xHandles, setXHandles] = useState("");
+
+  const [limits, setLimits] = useState({
+    n_paths_max: 10000,
+    horizon_days_max: 3650,
+    pathday_budget_max: 500000,
+  });
 
   const polygonKey = useMemo(() => {
     const envMap = (import.meta as any)?.env ?? {};
@@ -174,19 +155,23 @@ function DashboardApp() {
     isSimulating,
     logMessages,
     progress,
-    drivers,
-    probUp,
-    probUpNext,
-    art,
-    currentPrice,
     runId,
     recentRuns,
     setRecentRuns,
     runPredict,
     runSimulation,
   } = sim;
-
-  const authHeaders = useMemo(() => getAuthHeaders(), [getAuthHeaders]);
+  const {
+    artifact: art,
+    drivers,
+    probUp,
+    probUpNext,
+    currentPrice,
+    s0FromArt,
+    kpiMedianDeltaPct,
+    ladderRows,
+    diagnostics,
+  } = useDashboardData();
 
   const handlePredict = useCallback(() => {
     runPredict({ symbol, horizonDays: coerceDays(horizon) });
@@ -194,11 +179,47 @@ function DashboardApp() {
 
   const handleSimulation = useCallback(
     (mode: SimMode) => {
+      const symbolNormalized = (symbol || "").trim().toUpperCase();
+      if (!symbolNormalized) {
+        sim.throttledLog("Error: Enter a valid ticker symbol.");
+        return;
+      }
+
+      let horizonDays = coerceDays(horizon);
+      if (!Number.isFinite(horizonDays) || horizonDays <= 0) {
+        horizonDays = mode === "deep" ? 3650 : 30;
+      }
+      horizonDays = Math.max(1, Math.floor(horizonDays));
+      if (limits.horizon_days_max && horizonDays > limits.horizon_days_max) {
+        sim.throttledLog(
+          `Notice: Horizon capped at ${limits.horizon_days_max.toLocaleString()} days (configuration limit).`
+        );
+        horizonDays = limits.horizon_days_max;
+      }
+
+      let nPaths = Math.max(1, Math.round(paths));
+      if (limits.n_paths_max && nPaths > limits.n_paths_max) {
+        sim.throttledLog(
+          `Notice: Paths capped at ${limits.n_paths_max.toLocaleString()} (configuration limit).`
+        );
+        nPaths = limits.n_paths_max;
+      }
+
+      const budget = limits.pathday_budget_max || 0;
+      const pathDays = horizonDays * nPaths;
+      if (budget > 0 && pathDays > budget) {
+        const maxPaths = Math.max(1, Math.floor(budget / horizonDays));
+        sim.throttledLog(
+          `Error: ${nPaths.toLocaleString()} paths × ${horizonDays.toLocaleString()} days = ${pathDays.toLocaleString()} path-days exceeds the compute budget of ${budget.toLocaleString()}. Reduce paths to ≤ ${maxPaths.toLocaleString()} or shorten the horizon.`
+        );
+        return;
+      }
+
       runSimulation({
         mode,
-        symbol,
-        horizonDays: coerceDays(horizon),
-        nPaths: paths,
+        symbol: symbolNormalized,
+        horizonDays,
+        nPaths,
         includeNews,
         includeOptions,
         includeFutures,
@@ -214,6 +235,8 @@ function DashboardApp() {
       includeOptions,
       includeFutures,
       xHandles,
+      limits,
+      sim.throttledLog,
     ]
   );
 
@@ -241,9 +264,53 @@ function DashboardApp() {
 
   // News
   const { items: newsItemsRaw, nextCursor, loading: newsLoading, error: newsError, loadMore } = useNews({
-    symbol, includeNews, limit: 6, days: 7, retry: 0, apiBase: API_BASE, getHeaders: getAuthHeaders, onLog: sim.throttledLog,
+    symbol,
+    includeNews,
+    limit: 6,
+    days: 7,
+    retry: 0,
+    apiBase: API_BASE,
+    apiKey: hasPolygonKey ? polygonKey : undefined,
+    getHeaders: getAuthHeaders,
+    onLog: sim.throttledLog,
+    client,
   });
   const newsItems = useMemo(() => (Array.isArray(newsItemsRaw) ? newsItemsRaw : []), [newsItemsRaw]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchLimits = async () => {
+      try {
+        const resp = await fetch(api("/config"), { credentials: "include" });
+        const txt = await safeText(resp);
+        if (!resp.ok) {
+          throw new Error(txt || `HTTP ${resp.status}`);
+        }
+        const body = txt ? JSON.parse(txt) : {};
+        const settings = body?.settings ?? body ?? {};
+        if (cancelled) return;
+        setLimits({
+          n_paths_max: Number.isFinite(Number(settings.n_paths_max))
+            ? Number(settings.n_paths_max)
+            : 10000,
+          horizon_days_max: Number.isFinite(Number(settings.horizon_days_max))
+            ? Number(settings.horizon_days_max)
+            : 3650,
+          pathday_budget_max: Number.isFinite(Number(settings.pathday_budget_max))
+            ? Number(settings.pathday_budget_max)
+            : 500000,
+        });
+      } catch (err: any) {
+        if (!cancelled) {
+          sim.throttledLog(`Config fetch error: ${err?.message || err}`);
+        }
+      }
+    };
+    fetchLimits();
+    return () => {
+      cancelled = true;
+    };
+  }, [sim.throttledLog]);
 
   // Derived display
   const probMeta = useMemo(() => {
@@ -255,115 +322,6 @@ function DashboardApp() {
 
   const fmtPct = (x: number | undefined | null) => (Number.isFinite(x) ? (x as number) : 0).toLocaleString(undefined, { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1, });
   const eod = art?.eod_estimate ?? null;
-  const diagnostics = useMemo(() => {
-    const raw = art?.diagnostics as DiagnosticsSnapshot | null | undefined;
-    if (!raw) return null;
-    const toNum = (val: unknown): number | null => {
-      const num = typeof val === "string" ? Number(val) : val;
-      return typeof num === "number" && Number.isFinite(num) ? num : null;
-    };
-    const maybeMu = (raw?.mu ?? null) as any;
-    const maybeSigma = (raw?.sigma ?? null) as any;
-    const muPre = toNum(maybeMu?.pre ?? raw?.mu_pre ?? maybeMu?.before ?? (raw as any)?.mu_before);
-    const muPost = toNum(maybeMu?.post ?? raw?.mu_post ?? maybeMu?.after ?? (raw as any)?.mu_after);
-    const sigmaPre = toNum(maybeSigma?.pre ?? raw?.sigma_pre ?? maybeSigma?.before ?? (raw as any)?.sigma_before);
-    const sigmaPost = toNum(maybeSigma?.post ?? raw?.sigma_post ?? maybeSigma?.after ?? (raw as any)?.sigma_after);
-    const context = (raw?.context ?? {}) as Record<string, unknown>;
-    const sentimentSrc = (raw?.sentiment ?? context?.sentiment) as Record<string, unknown> | undefined;
-    const earningsSrc = (raw?.earnings ?? context?.earnings) as Record<string, unknown> | undefined;
-    const macroSrc = (raw?.macro ?? context?.macro) as Record<string, unknown> | undefined;
-    const regimeSrc = (raw?.regime ?? context?.regime) as Record<string, unknown> | undefined;
-    const schedulerSrc = (raw?.scheduler ?? context?.scheduler) as Record<string, unknown> | undefined;
-
-    const sentimentAvg7d = toNum(
-      sentimentSrc?.avg_sent_7d ?? sentimentSrc?.avg7d ?? sentimentSrc?.avg ?? sentimentSrc?.avg_7d
-    );
-    const sentiment24h = toNum(
-      sentimentSrc?.avg_sent_last24h ?? sentimentSrc?.last24h ?? sentimentSrc?.day ?? sentimentSrc?.last_24h
-    );
-    const sentimentDelta =
-      typeof sentimentAvg7d === "number" && typeof sentiment24h === "number"
-        ? sentiment24h - sentimentAvg7d
-        : null;
-
-    const earningsSurprise = toNum(
-      earningsSrc?.surprise_pct ??
-        earningsSrc?.surprise_percent ??
-        earningsSrc?.surprise ??
-        earningsSrc?.last_surprise_pct
-    );
-    const earningsDaysSince = toNum(
-      earningsSrc?.days_since ?? earningsSrc?.days ?? earningsSrc?.last_days ?? earningsSrc?.last_event_days_ago
-    );
-
-    const macroRff = toNum(macroSrc?.rff);
-    const macroCpi = toNum(macroSrc?.cpi_yoy ?? macroSrc?.cpi);
-    const macroURate = toNum(macroSrc?.u_rate ?? macroSrc?.unemployment);
-    const macroUpdatedAt =
-      typeof macroSrc?.updated_at === "string" && macroSrc.updated_at.trim()
-        ? macroSrc.updated_at.trim()
-        : undefined;
-
-    const regimeName =
-      typeof regimeSrc?.name === "string" && regimeSrc.name.trim() ? regimeSrc.name.trim() : undefined;
-    const regimeScore = toNum(regimeSrc?.score);
-
-    const schedulerTimestamps: Array<{ label: string; iso: string }> = [];
-    const pushTimestamp = (label: string, value: unknown) => {
-      if (typeof value === "string" && value.trim()) {
-        schedulerTimestamps.push({ label, iso: value.trim() });
-      }
-    };
-    if (schedulerSrc && typeof schedulerSrc === "object") {
-      const sched: any = schedulerSrc;
-      pushTimestamp("news", sched.news_fetch_ts ?? sched.news_ts ?? sched.news_timestamp ?? sched.news?.ts);
-      pushTimestamp(
-        "earnings",
-        sched.earnings_fetch_ts ?? sched.earnings_ts ?? sched.earnings_timestamp ?? sched.earnings?.ts
-      );
-      pushTimestamp(
-        "macro",
-        sched.macro_fetch_ts ?? sched.macro_ts ?? sched.macro_timestamp ?? sched.macro?.ts ?? macroUpdatedAt
-      );
-    } else if (macroUpdatedAt) {
-      pushTimestamp("macro", macroUpdatedAt);
-    }
-
-    const scheduler = schedulerTimestamps.length ? schedulerTimestamps : null;
-
-    const hasAny =
-      [muPre, muPost, sigmaPre, sigmaPost, sentimentAvg7d, sentiment24h, earningsSurprise, earningsDaysSince, macroRff, macroCpi, macroURate].some(
-        (v) => typeof v === "number" && Number.isFinite(v)
-      ) || !!regimeName || typeof regimeScore === "number" || (scheduler?.length ?? 0) > 0;
-
-    if (!hasAny) return null;
-
-    return {
-      muPre,
-      muPost,
-      sigmaPre,
-      sigmaPost,
-      sentiment:
-        typeof sentimentAvg7d === "number" || typeof sentiment24h === "number"
-          ? { avg7d: sentimentAvg7d ?? null, last24h: sentiment24h ?? null, delta: sentimentDelta }
-          : null,
-      earnings:
-        typeof earningsSurprise === "number" || typeof earningsDaysSince === "number"
-          ? { surprise: earningsSurprise ?? null, daysSince: earningsDaysSince ?? null }
-          : null,
-      macro:
-        typeof macroRff === "number" || typeof macroCpi === "number" || typeof macroURate === "number"
-          ? { rff: macroRff ?? null, cpi: macroCpi ?? null, uRate: macroURate ?? null, updatedAt: macroUpdatedAt }
-          : macroUpdatedAt
-            ? { rff: null, cpi: null, uRate: null, updatedAt: macroUpdatedAt }
-          : null,
-      regime:
-        regimeName || typeof regimeScore === "number"
-          ? { name: regimeName ?? null, score: regimeScore ?? null }
-          : null,
-      scheduler,
-    };
-  }, [art?.diagnostics]);
   const fmtDiag = (value: number | null | undefined) =>
     typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "-";
   const fmtDiagPercent = (value: number | null | undefined, digits = 1) => {
@@ -429,47 +387,6 @@ function DashboardApp() {
     navigator.clipboard.writeText(url); toast.success("Shareable link copied.");
   };
 
-  // Derived KPIs
-  const kpiMedianDeltaPct = (() => {
-    if (!art) return null; const s0 = art.median_path?.[0]?.[1] ?? 0; const sH = art.median_path?.at(-1)?.[1] ?? 0;
-    if (!s0 || !Number.isFinite(s0) || !Number.isFinite(sH)) return null; return ((sH / s0 - 1) * 100);
-  })();
-  const s0FromArt = (art as any)?.spot ?? (art as any)?.inputs?.S0 ?? (Array.isArray(art?.median_path) ? art?.median_path?.[0]?.[1] : null);
-  const ladderRows = useMemo(() => {
-    const targetLevels = art?.targets?.levels;
-    if (Array.isArray(targetLevels) && targetLevels.length) {
-      return targetLevels
-        .map((lvl) => {
-          const label = typeof lvl?.label === "string" && lvl.label.trim() ? lvl.label.trim() : `${Number(lvl?.price ?? 0).toFixed(2)}`;
-          return {
-            label,
-            price: Number(lvl?.price ?? 0),
-            hitEver: typeof lvl?.hitEver === "number" ? lvl.hitEver : undefined,
-            hitByEnd: typeof lvl?.hitByEnd === "number" ? lvl.hitByEnd : undefined,
-            tMedDays: typeof lvl?.tMedDays === "number" ? lvl.tMedDays : undefined,
-          };
-        })
-        .filter((lvl) => Number.isFinite(lvl.price));
-    }
-    if (!art || !currentPrice) {
-      return [] as Array<{ label: string; price: number; hitEver?: number; hitByEnd?: number; tMedDays?: number }>;
-    }
-    const rung = (price: number, label: string) => ({
-      label,
-      price,
-      hitEver: undefined,
-      hitByEnd: undefined,
-      tMedDays: undefined,
-    });
-    return [
-      rung(currentPrice * 0.8, "-20%"),
-      rung(currentPrice * 0.9, "-10%"),
-      { label: "Spot", price: currentPrice, hitEver: undefined, hitByEnd: undefined, tMedDays: undefined },
-      rung(currentPrice * 1.1, "+10%"),
-      rung(currentPrice * 1.2, "+20%"),
-      rung(currentPrice * 1.3, "+30%"),
-    ];
-  }, [art, currentPrice]);
 
   const loadRunConfig = useCallback(
     (run: { symbol: string; horizon: number; n_paths: number }) => {
@@ -513,6 +430,487 @@ function DashboardApp() {
   );
 
   const navItems = DASHBOARD_NAV;
+
+  const overviewCards: DashboardCardConfig[] = [
+    {
+      id: "overview-quant",
+      className: "md:col-span-2",
+      content: (
+        <>
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-white/60">Daily Quant Picks</div>
+          </div>
+          <div className="mt-3">
+            <DailyQuantCard
+              onOpen={(sym, h) => {
+                setSymbol(sym);
+                setHorizon(h || 30);
+              }}
+            />
+          </div>
+          <div className="mt-2 text-[10px] leading-4 text-white/50">
+            For research and educational use.
+          </div>
+        </>
+      ),
+    },
+    {
+      id: "overview-kpis",
+      content: (
+        <>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <div className="text-white/60">Current</div>
+              <div className="font-mono">
+                {typeof currentPrice === "number" && Number.isFinite(currentPrice)
+                  ? `$${currentPrice.toFixed(2)}`
+                  : typeof s0FromArt === "number" && Number.isFinite(s0FromArt)
+                    ? `$${Number(s0FromArt).toFixed(2)}`
+                    : "-"}
+              </div>
+            </div>
+            <div>
+              <div className="text-white/60">P(up)</div>
+              <div className={`font-mono ${probMeta.color}`}>{fmtPct(probMeta.v)}</div>
+            </div>
+            <div>
+              <div className="text-white/60">P(up next)</div>
+              <div className="font-mono">
+                {Number.isFinite(probUpNext as any) ? fmtPct(probUpNext!) : "-"}
+              </div>
+            </div>
+            <div>
+              <div className="text-white/60">Median delta (H)</div>
+              <div className="font-mono">
+                {typeof kpiMedianDeltaPct === "number" ? `${kpiMedianDeltaPct.toFixed(1)}%` : "-"}
+              </div>
+            </div>
+          </div>
+          <div className="mt-4">
+            <QuotaCard />
+          </div>
+        </>
+      ),
+    },
+  ];
+
+  const simulationCards: DashboardCardConfig[] = [
+    {
+      id: "controls-card",
+      title: "Simulation Controls",
+      content: (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Field label="Ticker / Symbol">
+              <TickerAutocomplete
+                value={symbol}
+                onChange={setSymbol}
+                apiKey={hasPolygonKey ? polygonKey : undefined}
+                placeholder="e.g., NVDA"
+              />
+              {!hasPolygonKey && (
+                <p className="mt-1 text-[11px] text-white/50">
+                  Provide a Polygon API key to enable live ticker search suggestions.
+                </p>
+              )}
+            </Field>
+            <Field label="Horizon (days)">
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                value={horizon}
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  if (v === "") return setHorizon("");
+                  const n = e.currentTarget.valueAsNumber;
+                  setHorizon(Number.isFinite(n) ? n : "");
+                }}
+                placeholder="30"
+              />
+            </Field>
+            <Field label="Paths">
+              <input
+                type="number"
+                min={100}
+                step={100}
+                className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                value={paths}
+                onChange={(e) => {
+                  const v = e.currentTarget.valueAsNumber;
+                  setPaths(Number.isFinite(v) ? v : paths);
+                }}
+                placeholder="2000"
+              />
+            </Field>
+            <div className="col-span-2 lg:col-span-4">
+              <Field label="X (Twitter) handles - optional">
+                <input
+                  className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
+                  value={xHandles}
+                  onChange={(e) => setXHandles(e.target.value)}
+                  placeholder="comma,separated,handles"
+                />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeOptions}
+                onChange={(e) => setIncludeOptions(e.target.checked)}
+              />
+              Include options
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeFutures}
+                onChange={(e) => setIncludeFutures(e.target.checked)}
+              />
+              Include futures
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeNews}
+                onChange={(e) => setIncludeNews(e.target.checked)}
+              />
+              Include news
+            </label>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <LoadingButton
+              label="Quick Sim"
+              loadingLabel={`Simulating... ${Math.round(progress)}%`}
+              loading={isSimulating}
+              onClick={() => !isSimulating && handleSimulation("quick")}
+              className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+            />
+            <LoadingButton
+              label="Deep Sim"
+              loadingLabel={`Simulating... ${Math.round(progress)}%`}
+              loading={isSimulating}
+              onClick={() => !isSimulating && handleSimulation("deep")}
+              className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+            />
+            <LoadingButton
+              label="Predict"
+              loadingLabel="Predicting..."
+              loading={isPredicting}
+              onClick={handlePredict}
+              className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
+            />
+          </div>
+        </>
+      ),
+    },
+    {
+      id: "activity-log",
+      title: "Activity Log",
+      content: (
+        <div
+          ref={logRef}
+          className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs text-white/80`}
+        >
+          {(Array.isArray(logMessages) ? logMessages : []).map((m, i) => (
+            <div key={i}>{String(m ?? "")}</div>
+          ))}
+        </div>
+      ),
+    },
+  ];
+
+  const insightItems: DashboardCardConfig[] = [
+    {
+      id: "fan-card",
+      title: "Price Forecast",
+      className: "lg:col-span-2",
+      actions: (
+        <CardMenu
+          items={[
+            { label: "Focus", onClick: () => setFocus("fan"), disabled: !art },
+            { label: "Export PNG", onClick: () => exportChart("fan"), disabled: !art },
+            { label: "Share link", onClick: () => shareChart("fan"), disabled: !art },
+          ]}
+        />
+      ),
+      content: (
+        <div data-chart="fan" className="h-64 md:h-80">
+          <EB>
+            <Suspense fallback={<ChartFallback />}>
+              {art ? (
+                <FanChart artifact={art} />
+              ) : (
+                <div className="text-xs text-white/60">Run a simulation to view.</div>
+              )}
+            </Suspense>
+          </EB>
+          {diagnostics && (
+            <details className="mt-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/70">
+              <summary className="cursor-pointer text-sm font-semibold text-white/80">
+                Diagnostics
+              </summary>
+              <div className="mt-2 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">mu</span>
+                  <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
+                    <span>pre {fmtDiag(diagnostics.muPre)}</span>
+                    <span className="text-white/60">post {fmtDiag(diagnostics.muPost)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">sigma</span>
+                  <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
+                    <span>pre {fmtDiag(diagnostics.sigmaPre)}</span>
+                    <span className="text-white/60">post {fmtDiag(diagnostics.sigmaPost)}</span>
+                  </div>
+                </div>
+                {diagnostics.regime && (
+                  <div className="flex flex-wrap items-center gap-2 text-white/70">
+                    <span className="text-white/60">Regime</span>
+                    <span className="rounded-full border border-white/15 px-2 py-0.5">
+                      {diagnostics.regime.name ?? "-"}
+                    </span>
+                    {typeof diagnostics.regime.score === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5">
+                        {fmtDiagPercent(diagnostics.regime.score, 0)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {diagnostics.sentiment && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-white/60">Sentiment</span>
+                    {typeof diagnostics.sentiment.avg7d === "number" && (
+                      <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-emerald-200">
+                        7d {fmtDiagPercent(diagnostics.sentiment.avg7d)}
+                      </span>
+                    )}
+                    {typeof diagnostics.sentiment.last24h === "number" && (
+                      <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-sky-200">
+                        24h {fmtDiagPercent(diagnostics.sentiment.last24h)}
+                      </span>
+                    )}
+                    {typeof diagnostics.sentiment.delta === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
+                        delta {fmtDiagPercent(diagnostics.sentiment.delta)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {diagnostics.earnings && (
+                  <div className="flex flex-wrap items-center gap-2 text-white/70">
+                    <span className="text-white/60">Earnings</span>
+                    {typeof diagnostics.earnings.surprise === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5">
+                        surprise {fmtDiagPercent(diagnostics.earnings.surprise)}
+                      </span>
+                    )}
+                    {typeof diagnostics.earnings.daysSince === "number" && (
+                      <span className="rounded-full border border-white/15 px-2 py-0.5">
+                        {fmtDiagDaysAgo(diagnostics.earnings.daysSince)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {diagnostics.macro && (
+                  <div className="flex flex-wrap items-center gap-2 text-white/70">
+                    {typeof diagnostics.macro.rff === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5">
+                        RFF {fmtDiagPercent(diagnostics.macro.rff, 2)}
+                      </span>
+                    )}
+                    {typeof diagnostics.macro.cpi === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5">
+                        CPI {fmtDiagPercent(diagnostics.macro.cpi, 1)}
+                      </span>
+                    )}
+                    {typeof diagnostics.macro.uRate === "number" && (
+                      <span className="rounded-full bg-white/10 px-2 py-0.5">
+                        U {fmtDiagPercent(diagnostics.macro.uRate, 1)}
+                      </span>
+                    )}
+                    {diagnostics.macro.updatedAt && (
+                      <span className="rounded-full border border-white/15 px-2 py-0.5 text-white/60">
+                        {fmtDiagTimestamp(diagnostics.macro.updatedAt) ?? diagnostics.macro.updatedAt}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {diagnostics.scheduler && diagnostics.scheduler.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 text-white/60">
+                    <span className="text-white/60">Scheduler</span>
+                    {diagnostics.scheduler.map((entry) => (
+                      <span
+                        key={`${entry.label}-${entry.iso}`}
+                        className="rounded-full border border-white/15 px-2 py-0.5"
+                      >
+                        {entry.label}: {fmtDiagTimestamp(entry.iso) ?? entry.iso}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
+          {art && (
+            <div className="mt-2">
+              <InlineLegend />
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "targets-card",
+      className: "lg:col-span-1",
+      wrapper: "component",
+      content: (
+        <TargetsAndOdds
+          spot={art?.targets?.spot ?? currentPrice ?? 0}
+          horizonDays={art?.targets?.horizon_days ?? Number(horizon || 0)}
+          rows={ladderRows}
+        />
+      ),
+    },
+    {
+      id: "terminal-card",
+      title: "Terminal Distribution",
+      actions: (
+        <CardMenu
+          items={[
+            { label: "Focus", onClick: () => setFocus("terminal"), disabled: !art },
+            { label: "Export PNG", onClick: () => exportChart("terminal"), disabled: !art },
+          ]}
+        />
+      ),
+      content: (
+        <div data-chart="terminal" className="h-64 md:h-80">
+          <EB>
+            <Suspense fallback={<ChartFallback />}>
+              {Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? (
+                <TerminalDistribution
+                  prices={(art!.terminal_prices || []).filter(
+                    (v): v is number => typeof v === "number" && Number.isFinite(v)
+                  )}
+                />
+              ) : (
+                <div className="text-xs text-white/60">No terminal distribution yet.</div>
+              )}
+            </Suspense>
+          </EB>
+        </div>
+      ),
+    },
+    {
+      id: "drivers-card",
+      title: "Drivers (Explainability)",
+      actions: (
+        <CardMenu
+          items={[
+            { label: "Focus", onClick: () => setFocus("drivers"), disabled: !drivers?.length },
+            { label: "Export PNG", onClick: () => exportChart("drivers"), disabled: !drivers?.length },
+          ]}
+        />
+      ),
+      content: (
+        <div data-chart="drivers" className="h-64 md:h-80">
+          <EB>
+            <Suspense fallback={<ChartFallback />}>
+              {drivers?.length ? (
+                <DriversWaterfall
+                  drivers={drivers.map((d) => ({
+                    feature: d.feature,
+                    weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0,
+                  }))}
+                />
+              ) : (
+                <div className="text-xs text-white/60">No drivers yet.</div>
+              )}
+            </Suspense>
+          </EB>
+        </div>
+      ),
+    },
+    {
+      id: "summary-card",
+      title: "Run Summary",
+      content: (
+        <EB>
+          {art ? (
+            <SummaryCard
+              probUpLabel={fmtPct(Math.max(0, Math.min(1, probUp || 0)))}
+              probUpColor={probMeta.color}
+              progress={progress}
+              currentPrice={
+                typeof currentPrice === "number" && Number.isFinite(currentPrice) ? currentPrice : undefined
+              }
+              eod={eod || undefined}
+            />
+          ) : (
+            <div className="text-xs text-white/60">Run a simulation to view summary.</div>
+          )}
+        </EB>
+      ),
+    },
+    {
+      id: "scenarios-card",
+      title: "Scenarios",
+      className: "lg:col-span-2",
+      content: (
+        <EB>
+          <Suspense fallback={<ChartFallback />}>
+            {art ? (
+              <ScenarioTiles artifact={art} />
+            ) : (
+              <div className="text-xs text-white/60">No scenarios available.</div>
+            )}
+          </Suspense>
+        </EB>
+      ),
+    },
+    {
+      id: "news",
+      className: "lg:col-span-2",
+      content: (
+        <EB>
+          {includeNews ? (
+            <NewsList
+              symbol={symbol}
+              items={newsItems}
+              loading={newsLoading}
+              error={newsError || undefined}
+              onLoadMore={loadMore}
+              nextCursor={nextCursor}
+              maxHeight={360}
+            />
+          ) : (
+            <ListCard title="News" subtitle={symbol.toUpperCase()} maxHeight={220}>
+              <div className="px-4 py-6 text-xs text-white/60">
+                Enable "Include news" to fetch recent headlines.
+              </div>
+            </ListCard>
+          )}
+        </EB>
+      ),
+    },
+    {
+      id: "simetrix-ai",
+      title: "Simetrix AI",
+      content: (
+        <>
+          {runId ? (
+            <SimSummaryCard runId={runId} />
+          ) : (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+              Powered by xAI.
+            </div>
+          )}
+        </>
+      ),
+    },
+  ];
 
   useEffect(() => {
     let cancelled = false;
@@ -610,449 +1008,36 @@ function DashboardApp() {
         <div className="mx-auto max-w-7xl px-6 pb-12 md:px-8">
           <div className="space-y-6">
             <section id="overview" className="grid grid-cols-1 gap-6 pt-6 md:grid-cols-3">
-              <Card id="overview-quant" className="md:col-span-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-white/60">Daily Quant Picks</div>
-                </div>
-                <div className="mt-3">
-                  <DailyQuantCard
-                    apiBase={API_BASE}
-                    getHeaders={getAuthHeaders}
-                    onOpen={(sym, h) => {
-                      setSymbol(sym);
-                      setHorizon(h || 30);
-                    }}
-                  />
-                </div>
-                <div className="mt-2 text-[10px] leading-4 text-white/50">For research and educational use.</div>
-              </Card>
-
-              <Card id="overview-kpis">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <div className="text-white/60">Current</div>
-                    <div className="font-mono">
-                      {typeof currentPrice === "number" && Number.isFinite(currentPrice)
-                        ? `$${currentPrice.toFixed(2)}`
-                        : typeof s0FromArt === "number" && Number.isFinite(s0FromArt)
-                          ? `$${Number(s0FromArt).toFixed(2)}`
-                          : "-"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-white/60">P(up)</div>
-                    <div className={`font-mono ${probMeta.color}`}>{fmtPct(probMeta.v)}</div>
-                  </div>
-                  <div>
-                    <div className="text-white/60">P(up next)</div>
-                    <div className="font-mono">
-                      {Number.isFinite(probUpNext as any) ? fmtPct(probUpNext!) : "-"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-white/60">Median delta (H)</div>
-                    <div className="font-mono">
-                      {typeof kpiMedianDeltaPct === "number" ? `${kpiMedianDeltaPct.toFixed(1)}%` : "-"}
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <QuotaCard />
-                </div>
-              </Card>
-            </section>
+  {overviewCards.map(({ id, title, className, actions, content }) => (
+    <Card key={id} id={id} title={title} actions={actions} className={className}>
+      {content}
+    </Card>
+  ))}
+</section>
 
             <section id="simulation" className="space-y-6">
               <ContextRibbon symbol={symbol} />
               <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
-                <Card id="controls-card" title="Simulation Controls">
-                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    <Field label="Ticker / Symbol">
-                      <TickerAutocomplete
-                        value={symbol}
-                        onChange={setSymbol}
-                        apiKey={hasPolygonKey ? polygonKey : undefined}
-                        placeholder="e.g., NVDA"
-                      />
-                      {!hasPolygonKey && (
-                        <p className="mt-1 text-[11px] text-white/50">
-                          Provide a Polygon API key to enable live ticker search suggestions.
-                        </p>
-                      )}
-                    </Field>
-                    <Field label="Horizon (days)">
-                      <input
-                        type="number"
-                        min={1}
-                        max={3650}
-                        className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={horizon}
-                        onChange={(e) => {
-                          const v = e.currentTarget.value;
-                          if (v === "") return setHorizon("");
-                          const n = e.currentTarget.valueAsNumber;
-                          setHorizon(Number.isFinite(n) ? n : "");
-                        }}
-                        placeholder="30"
-                      />
-                    </Field>
-                    <Field label="Paths">
-                      <input
-                        type="number"
-                        min={100}
-                        step={100}
-                        className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                        value={paths}
-                        onChange={(e) => {
-                          const v = e.currentTarget.valueAsNumber;
-                          setPaths(Number.isFinite(v) ? v : paths);
-                        }}
-                        placeholder="2000"
-                      />
-                    </Field>
-                    <div className="col-span-2 lg:col-span-4">
-                      <Field label="X (Twitter) handles - optional">
-                        <input
-                          className="w-full rounded-lg border border-white/15 bg-black/50 px-2 py-2 text-sm"
-                          value={xHandles}
-                          onChange={(e) => setXHandles(e.target.value)}
-                          placeholder="comma,separated,handles"
-                        />
-                      </Field>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeOptions}
-                        onChange={(e) => setIncludeOptions(e.target.checked)}
-                      />
-                      Include options
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeFutures}
-                        onChange={(e) => setIncludeFutures(e.target.checked)}
-                      />
-                      Include futures
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={includeNews}
-                        onChange={(e) => setIncludeNews(e.target.checked)}
-                      />
-                      Include news
-                    </label>
-                  </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <LoadingButton
-                      label="Quick Sim"
-                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                      loading={isSimulating}
-                      onClick={() => !isSimulating && handleSimulation("quick")}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                    />
-                    <LoadingButton
-                      label="Deep Sim"
-                      loadingLabel={`Simulating... ${Math.round(progress)}%`}
-                      loading={isSimulating}
-                      onClick={() => !isSimulating && handleSimulation("deep")}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                    />
-                    <LoadingButton
-                      label="Predict"
-                      loadingLabel="Predicting..."
-                      loading={isPredicting}
-                      onClick={handlePredict}
-                      className="rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-white transition hover:bg-white/10"
-                    />
-                  </div>
-                </Card>
-
-                <Card id="activity-log" title="Activity Log">
-                  <div
-                    ref={logRef}
-                    className={`overflow-auto ${LOG_HEIGHT} whitespace-pre-wrap text-xs text-white/80`}
-                  >
-                    {(Array.isArray(logMessages) ? logMessages : []).map((m, i) => (
-                      <div key={i}>{String(m ?? "")}</div>
-                    ))}
-                  </div>
-                </Card>
+                {simulationCards.map(({ id, title, className, actions, content }) => (
+                  <Card key={id} id={id} title={title} actions={actions} className={className}>
+                    {content}
+                  </Card>
+                ))}
               </div>
 
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
-                <Card
-                  id="fan-card"
-                  title="Price Forecast"
-                  actions={
-                    <CardMenu
-                      items={[
-                        { label: "Focus", onClick: () => setFocus("fan"), disabled: !art },
-                        { label: "Export PNG", onClick: () => exportChart("fan"), disabled: !art },
-                        { label: "Share link", onClick: () => shareChart("fan"), disabled: !art },
-                      ]}
-                    />
-                  }
-                  className="lg:col-span-2"
-                >
-                  <div data-chart="fan" className="h-64 md:h-80">
-                    <EB>
-                      <Suspense fallback={<ChartFallback />}>
-                        {art ? (
-                          <FanChart artifact={art} />
-                        ) : (
-                          <div className="text-xs text-white/60">Run a simulation to view.</div>
-                        )}
-                      </Suspense>
-                    </EB>
-                    {diagnostics && (
-                      <details className="mt-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/70">
-                        <summary className="cursor-pointer text-sm font-semibold text-white/80">
-                          Diagnostics
-                        </summary>
-                        <div className="mt-2 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-white/60">mu</span>
-                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
-                              <span>pre {fmtDiag(diagnostics.muPre)}</span>
-                              <span className="text-white/60">post {fmtDiag(diagnostics.muPost)}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-white/60">sigma</span>
-                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 font-mono text-white/80">
-                              <span>pre {fmtDiag(diagnostics.sigmaPre)}</span>
-                              <span className="text-white/60">post {fmtDiag(diagnostics.sigmaPost)}</span>
-                            </div>
-                          </div>
-                          {diagnostics.regime && (
-                            <div className="flex flex-wrap items-center gap-2 text-white/70">
-                              <span className="text-white/60">Regime</span>
-                              <span className="rounded-full border border-white/15 px-2 py-0.5">
-                                {diagnostics.regime.name ?? "-"}
-                              </span>
-                              {typeof diagnostics.regime.score === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5">
-                                  {fmtDiagPercent(diagnostics.regime.score, 0)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {diagnostics.sentiment && (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-white/60">Sentiment</span>
-                              {typeof diagnostics.sentiment.avg7d === "number" && (
-                                <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-emerald-200">
-                                  7d {fmtDiagPercent(diagnostics.sentiment.avg7d)}
-                                </span>
-                              )}
-                              {typeof diagnostics.sentiment.last24h === "number" && (
-                                <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-sky-200">
-                                  24h {fmtDiagPercent(diagnostics.sentiment.last24h)}
-                                </span>
-                              )}
-                              {typeof diagnostics.sentiment.delta === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
-                                  delta {fmtDiagPercent(diagnostics.sentiment.delta)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {diagnostics.earnings && (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-white/60">Earnings</span>
-                              {typeof diagnostics.earnings.surprise === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
-                                  surprise {fmtDiagPercent(diagnostics.earnings.surprise)}
-                                </span>
-                              )}
-                              {typeof diagnostics.earnings.daysSince === "number" && (
-                                <span className="rounded-full border border-white/15 px-2 py-0.5 text-white/70">
-                                  {fmtDiagDaysAgo(diagnostics.earnings.daysSince)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {diagnostics.macro && (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-white/60">Macro</span>
-                              {typeof diagnostics.macro.rff === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
-                                  RFF {fmtDiagPercent(diagnostics.macro.rff, 2)}
-                                </span>
-                              )}
-                              {typeof diagnostics.macro.cpi === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
-                                  CPI {fmtDiagPercent(diagnostics.macro.cpi, 1)}
-                                </span>
-                              )}
-                              {typeof diagnostics.macro.uRate === "number" && (
-                                <span className="rounded-full bg-white/10 px-2 py-0.5 text-white/70">
-                                  U {fmtDiagPercent(diagnostics.macro.uRate, 1)}
-                                </span>
-                              )}
-                              {diagnostics.macro.updatedAt && (
-                                <span className="rounded-full border border-white/15 px-2 py-0.5 text-white/60">
-                                  {fmtDiagTimestamp(diagnostics.macro.updatedAt) ?? diagnostics.macro.updatedAt}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {diagnostics.scheduler && diagnostics.scheduler.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-2 text-white/60">
-                              <span className="text-white/60">Scheduler</span>
-                              {diagnostics.scheduler.map((entry) => (
-                                <span
-                                  key={`${entry.label}-${entry.iso}`}
-                                  className="rounded-full border border-white/15 px-2 py-0.5"
-                                >
-                                  {entry.label}: {fmtDiagTimestamp(entry.iso) ?? entry.iso}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </details>
-                    )}
-                    {art && (
-                      <div className="mt-2">
-                        <InlineLegend />
-                      </div>
-                    )}
-                  </div>
-                </Card>
-
-                <div id="targets-card" className="lg:col-span-1">
-                  <TargetsAndOdds
-                    spot={art?.targets?.spot ?? currentPrice ?? 0}
-                    horizonDays={art?.targets?.horizon_days ?? Number(horizon || 0)}
-                    rows={ladderRows}
-                  />
-                </div>
-
-                <Card
-                  id="terminal-card"
-                  title="Terminal Distribution"
-                  actions={
-                    <CardMenu
-                      items={[
-                        { label: "Focus", onClick: () => setFocus("terminal"), disabled: !art },
-                        { label: "Export PNG", onClick: () => exportChart("terminal"), disabled: !art },
-                      ]}
-                    />
-                  }
-                >
-                  <div data-chart="terminal" className="h-64 md:h-80">
-                    <EB>
-                      <Suspense fallback={<ChartFallback />}>
-                        {Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? (
-                          <TerminalDistribution
-                            prices={(art!.terminal_prices || []).filter(
-                              (v): v is number => typeof v === "number" && Number.isFinite(v)
-                            )}
-                          />
-                        ) : (
-                          <div className="text-xs text-white/60">No terminal distribution yet.</div>
-                        )}
-                      </Suspense>
-                    </EB>
-                  </div>
-                </Card>
-
-                <Card
-                  id="drivers-card"
-                  title="Drivers (Explainability)"
-                  actions={
-                    <CardMenu
-                      items={[
-                        { label: "Focus", onClick: () => setFocus("drivers"), disabled: !drivers?.length },
-                        { label: "Export PNG", onClick: () => exportChart("drivers"), disabled: !drivers?.length },
-                      ]}
-                    />
-                  }
-                >
-                  <div data-chart="drivers" className="h-64 md:h-80">
-                    <EB>
-                      <Suspense fallback={<ChartFallback />}>
-                        {drivers?.length ? (
-                          <DriversWaterfall
-                            drivers={drivers.map((d) => ({
-                              feature: d.feature,
-                              weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0,
-                            }))}
-                          />
-                        ) : (
-                          <div className="text-xs text-white/60">No drivers yet.</div>
-                        )}
-                      </Suspense>
-                    </EB>
-                  </div>
-                </Card>
-
-                <Card id="summary-card" title="Run Summary">
-                  <EB>
-                    {art ? (
-                      <SummaryCard
-                        probUpLabel={fmtPct(Math.max(0, Math.min(1, probUp || 0)))}
-                        probUpColor={probMeta.color}
-                        progress={progress}
-                        currentPrice={
-                          typeof currentPrice === "number" && Number.isFinite(currentPrice) ? currentPrice : undefined
-                        }
-                        eod={eod || undefined}
-                      />
-                    ) : (
-                      <div className="text-xs text-white/60">Run a simulation to view summary.</div>
-                    )}
-                  </EB>
-                </Card>
-
-                <Card id="scenarios-card" title="Scenarios" className="lg:col-span-2">
-                  <EB>
-                    <Suspense fallback={<ChartFallback />}>
-                      {art ? (
-                        <ScenarioTiles artifact={art} />
-                      ) : (
-                        <div className="text-xs text-white/60">No scenarios available.</div>
-                      )}
-                    </Suspense>
-                  </EB>
-                </Card>
-                <Card id="news" className="lg:col-span-2">
-                  <EB>
-                    {includeNews ? (
-                      <NewsList
-                        symbol={symbol}
-                        items={newsItems}
-                        loading={!!newsLoading}
-                        error={newsError}
-                        onLoadMore={loadMore}
-                        nextCursor={nextCursor}
-                        maxHeight={360}
-                      />
-                    ) : (
-                      <ListCard title="News" subtitle={symbol.toUpperCase()} maxHeight={220}>
-                        <div className="px-4 py-6 text-xs text-white/60">
-                          Enable "Include news" to fetch recent headlines.
-                        </div>
-                      </ListCard>
-                    )}
-                  </EB>
-                </Card>
-
-                <Card id="simetrix-ai">
-                  <div className="mb-2 text-sm text-white/60">Simetrix AI</div>
-                  {runId ? (
-                    <SimSummaryCard apiBase={API_BASE} runId={runId} headers={authHeaders} />
-                  ) : (
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-                      Powered by xAI.
-                    </div>
-                  )}
-                </Card>
-              </div>
+  {insightItems.map(({ id, title, className, actions, content, wrapper }) =>
+    wrapper === "component" ? (
+      <div key={id} id={id} className={className}>
+        {content}
+      </div>
+    ) : (
+      <Card key={id} id={id} title={title} actions={actions} className={className}>
+        {content}
+      </Card>
+    )
+  )}
+</div>
             </section>
 
             <section id="track-record">
@@ -1145,3 +1130,15 @@ function exportArtifact(art: MCArtifact | null) {
   const a = document.createElement("a"); a.href = url; a.download = `mc_${art.symbol}_${art.horizon_days}d.json`; a.click(); URL.revokeObjectURL(url);
   toast.success("Exported artifact as JSON");
 }
+
+
+
+
+
+
+
+
+
+
+
+

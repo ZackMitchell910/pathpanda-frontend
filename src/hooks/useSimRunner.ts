@@ -2,10 +2,10 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { throttle } from "@/utils/throttle";
 import type { MCArtifact, RunSummary, SimMode } from "@/types/simulation";
+import type { SimetrixClient } from "@/api/simetrixClient";
 
 type UseSimRunnerConfig = {
-  api: (path: string) => string;
-  getAuthHeaders: () => Record<string, string>;
+  client: SimetrixClient;
 };
 
 type RunPredictArgs = {
@@ -51,7 +51,7 @@ function looksLikeHTML(body: string) {
   return /^\s*<!doctype html>|<html/i.test(body);
 }
 
-export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
+export function useSimRunner({ client }: UseSimRunnerConfig) {
   const [isTraining, setIsTraining] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -104,10 +104,8 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
       setIsTraining(true);
       throttledLog(`${actionLabel}...`);
       try {
-        const resp = await fetch(api("/train"), {
+        const resp = await client.request("/train", {
           method: "POST",
-          credentials: "include",
-          headers: getAuthHeaders(),
           body: JSON.stringify({
             symbol: symbol.toUpperCase(),
             lookback_days: resolvedLookback,
@@ -127,7 +125,7 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
         setIsTraining(false);
       }
     },
-    [api, getAuthHeaders, throttledLog]
+    [client, throttledLog]
   );
 
   const runPredict = useCallback(
@@ -143,10 +141,8 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
       throttledLog(`Running prediction... [${symbol.toUpperCase()} H${horizonDays}]`);
       setIsPredicting(true);
       try {
-        const resp = await fetch(api("/predict"), {
+        const resp = await client.request("/predict", {
           method: "POST",
-          credentials: "include",
-          headers: getAuthHeaders(),
           body: JSON.stringify({
             symbol: symbol.toUpperCase(),
             horizon_days: horizonDays,
@@ -171,7 +167,7 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
         setIsPredicting(false);
       }
     },
-    [api, getAuthHeaders, throttledLog]
+    [client, throttledLog]
   );
 
   const runSimulation = useCallback(
@@ -242,10 +238,8 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
           payload.x_handles = xHandles.trim();
         }
 
-        const start = await fetch(api("/simulate"), {
+        const start = await client.request("/simulate", {
           method: "POST",
-          credentials: "include",
-          headers: getAuthHeaders(),
           body: JSON.stringify(payload),
         });
         const startTxt = await safeText(start);
@@ -260,19 +254,19 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
         abortStream();
         sseAbortRef.current = new AbortController();
         try {
-        await fetchEventSource(api(`/simulate/${run_id}/stream`), {
-          headers: getAuthHeaders(),
+        await fetchEventSource(client.resolvePath(`/simulate/${run_id}/stream`), {
+          headers: client.getHeaders(),
           signal: sseAbortRef.current.signal,
           openWhenHidden: true,
-          fetch: (input, init) =>
-            fetch(input, {
-              ...(init || {}),
-              credentials: "include",
-              headers: {
-                ...(init?.headers || {}),
-                ...getAuthHeaders(),
-              },
-            }),
+          fetch: (input, init) => {
+            const url =
+              typeof input === "string" || input instanceof URL
+                ? input
+                : input instanceof Request
+                ? input.url
+                : String(input);
+            return client.request(url, init ?? {});
+          },
           onopen: async (response) => {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             throttledLog("Connected to stream");
@@ -322,10 +316,7 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
           let attempt = 0;
           const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
           while (true) {
-            const resp = await fetch(api(`/simulate/${run_id}/artifact`), {
-              headers: getAuthHeaders(),
-              credentials: "include",
-            });
+            const resp = await client.request(`/simulate/${run_id}/artifact`);
             const artTxt = await safeText(resp);
             if (resp.status === 202) {
               throttledLog("Artifact pending... waiting a moment.");
@@ -362,10 +353,7 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
         };
 
         try {
-          const statusResp = await fetch(api(`/simulate/${run_id}/status`), {
-            headers: getAuthHeaders(),
-            credentials: "include",
-          });
+        const statusResp = await client.request(`/simulate/${run_id}/status`);
           const statusTxt = await safeText(statusResp);
           if (statusResp.ok && statusTxt) {
             try {
@@ -405,13 +393,12 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
         );
         const puNext = Number((artifact as any)?.prob_up_next);
         if (Number.isFinite(puNext)) setProbUpNext(puNext);
-        throttledLog(`Artifact loaded for run ${run_id}.`);
+        throttledLog(
+          `Artifact loaded for run ${run_id}. median_path=${artifact?.median_path?.length ?? 0} pts`
+        );
         try {
           if (artifact && run_id) {
-            fetch(api(`/runs/${run_id}/summary`), {
-              headers: getAuthHeaders(),
-              credentials: "include",
-            }).catch(() => {});
+            client.request(`/runs/${run_id}/summary`).catch(() => {});
           }
         } catch {
           // ignore
@@ -448,12 +435,11 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
     },
     [
       abortStream,
-      api,
-      getAuthHeaders,
       isTraining,
       trainModel,
       throttledLog,
       throttledProgress,
+      client,
     ]
   );
 
@@ -479,3 +465,8 @@ export function useSimRunner({ api, getAuthHeaders }: UseSimRunnerConfig) {
 }
 
 export type UseSimRunnerReturn = ReturnType<typeof useSimRunner>;
+
+
+
+
+
