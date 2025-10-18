@@ -332,17 +332,17 @@ function Band({ d, fill }: { d: string; fill: string }) {
 }
 
 /* ---------- New Sections ---------- */
-function ProductsSection() {
+export function ProductsSection() {
   const products = [
     {
       name: "Simetrix Dash",
       description: "Forecasting console for Simetrix Quant Engine (SQE) simulations, drivers, and daily quant signals.",
       href: "/app",
-      status: "Live",
+      status: "Alpha preview",
       icon: LineChart,
     },
     {
-      name: "AI Trader",
+      name: "Simetrix Trader",
       description: "Live execution cockpit for automated strategies, guardrails, and post-trade analytics.",
       href: "/trader",
       status: "Alpha preview",
