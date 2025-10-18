@@ -260,7 +260,7 @@ export const SimulationControls: React.FC<Props> = ({
           disabled={disabledSim || disabledAPI}
           busy={isSimulating}
           aria-label="Run simulation"
-          title="Run a Monte Carlo simulation"
+          title="Run a Simetrix Quant Engine (SQE) simulation"
         >
           Run Simulation
         </Btn>

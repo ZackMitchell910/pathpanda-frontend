@@ -1,7 +1,6 @@
-// Centralised helpers for resolving API configuration values with
+﻿// Centralised helpers for resolving API configuration values with
 // backwards-compatible fallbacks to the legacy PathPanda keys.
 declare const DEFAULT_SIMETRIX_BASE: string | undefined;
-declare const DEFAULT_SIMETRIX_KEY: string | undefined;
 declare const DEFAULT_PT_BASE: string | undefined;
 declare const DEFAULT_PT_KEY: string | undefined;
 
@@ -17,44 +16,86 @@ function pickFirstString(values: Array<unknown>): string {
   return "";
 }
 
-export function resolveApiBase(fallback = "https://api.simetrix.io"): string {
+export function resolveApiBase(fallback?: string): string {
+  const env: any = (import.meta as any)?.env ?? {};
+  const isDev = !!env?.DEV;
+  const defaultFallback = isDev
+    ? (typeof window !== "undefined" && typeof window.location !== "undefined"
+        ? window.location.origin ?? "http://127.0.0.1:8000"
+        : "http://127.0.0.1:8000")
+    : "https://api.simetrix.io";
+  const baseFallback = fallback ?? defaultFallback;
+
+  const searchBase =
+    typeof window !== "undefined" && typeof window.location !== "undefined"
+      ? (() => {
+          try {
+            const params = new URLSearchParams(window.location.search ?? "");
+            return params.get("smx_api_base") ?? params.get("apiBase") ?? params.get("api_base") ?? undefined;
+          } catch {
+            return undefined;
+          }
+        })()
+      : undefined;
+
+  const localStorageBase =
+    typeof window !== "undefined" ? (window.localStorage?.getItem("smx_api_base") ?? undefined) : undefined;
+
   const base = pickFirstString([
+    typeof searchBase === "string" ? searchBase : undefined,
+    typeof localStorageBase === "string" ? localStorageBase : undefined,
     typeof window !== "undefined" ? (window as any).__SMX_API_BASE__ : undefined,
     typeof window !== "undefined" ? (window as any).__PP_API_BASE__ : undefined,
-    typeof window !== "undefined" &&
-    (import.meta as any)?.env?.DEV &&
-    typeof window.location !== "undefined" &&
-    /^https?:/i.test(window.location.origin ?? "") &&
-    /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|::1)$/.test(window.location.hostname ?? "")
-      ? window.location.origin
-      : undefined,
+    env?.VITE_SIMETRIX_API_BASE,
+    env?.VITE_PT_API_BASE,
+    env?.VITE_PREDICTIVE_API,
+    env?.VITE_API_BASE,
     typeof DEFAULT_SIMETRIX_BASE !== "undefined" ? DEFAULT_SIMETRIX_BASE : undefined,
     typeof DEFAULT_PT_BASE !== "undefined" ? DEFAULT_PT_BASE : undefined,
     globalAny.DEFAULT_SIMETRIX_BASE,
     globalAny.DEFAULT_PT_BASE,
-    (import.meta as any)?.env?.VITE_SIMETRIX_API_BASE,
-    (import.meta as any)?.env?.VITE_PT_API_BASE,
-    (import.meta as any)?.env?.VITE_PREDICTIVE_API,
-    (import.meta as any)?.env?.VITE_API_BASE,
+    typeof window !== "undefined" && isDev &&
+    typeof window.location !== "undefined" &&
+    /^https?:/i.test(window.location.origin ?? "") &&
+    /^(localhost|127\.[0-9.]+|0\.0\.0\.0|::1)$/i.test(window.location.hostname ?? "")
+      ? window.location.origin
+      : undefined,
     typeof process !== "undefined" ? (process as any)?.env?.NEXT_PUBLIC_BACKEND_URL : undefined,
-    fallback,
+    baseFallback,
   ]);
 
   return base.replace(/\/+$/, "");
 }
 
-export function resolveApiKey(): string {
-  return pickFirstString([
-    typeof window !== "undefined" ? (window as any).__SMX_KEY__ : undefined,
-    typeof window !== "undefined" ? (window as any).__PP_KEY__ : undefined,
-    typeof DEFAULT_SIMETRIX_KEY !== "undefined" ? DEFAULT_SIMETRIX_KEY : undefined,
+export function resolveApiKey(): string | undefined {
+  if (typeof window !== "undefined") {
+    const stored =
+      window.localStorage?.getItem("pt_api_key") ??
+      window.localStorage?.getItem("smx_api_key") ??
+      window.localStorage?.getItem("pp_api_key");
+    if (stored && stored.trim()) return stored.trim();
+  }
+
+  const env: any = (import.meta as any)?.env ?? {};
+  const candidates = [env?.VITE_PT_API_KEY, env?.VITE_SIMETRIX_API_KEY, env?.VITE_API_KEY];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+
+  const globals = [
     typeof DEFAULT_PT_KEY !== "undefined" ? DEFAULT_PT_KEY : undefined,
-    globalAny.DEFAULT_SIMETRIX_KEY,
     globalAny.DEFAULT_PT_KEY,
-    (import.meta as any)?.env?.VITE_SIMETRIX_API_KEY,
-    (import.meta as any)?.env?.VITE_PT_API_KEY,
-    (import.meta as any)?.env?.VITE_API_KEY,
-    typeof window !== "undefined" ? window.localStorage?.getItem("smx_api_key") : undefined,
-    typeof window !== "undefined" ? window.localStorage?.getItem("pp_api_key") : undefined,
-  ]);
+  ];
+  for (const candidate of globals) {
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+
+  return undefined;
 }
+

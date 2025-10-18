@@ -17,11 +17,11 @@ export default function DocsPage() {
         <div id="whitepaper" className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-8">
           <h2 className="text-2xl font-brand">Whitepaper Summary</h2>
           <p className="mt-2 text-white/70 text-sm leading-relaxed">
-            SIMETRIX operates as a multi‑layer predictive intelligence engine designed to forecast market dynamics using
-            stochastic simulation, adaptive learning, and quantum‑inspired techniques. The platform integrates Monte‑Carlo
-            ensembles, feature‑based scoring, and automated outcome labeling to continuously refine its predictive
-            accuracy. Outputs include probabilistic bands (P50–P95), terminal distributions, and structured confidence
-            intervals accessible via dashboard or API.
+            SIMETRIX operates as a multi-layer predictive intelligence engine designed to forecast market dynamics using
+            stochastic simulation, adaptive learning, and quantum-inspired techniques. The platform leverages the
+            Simetrix Quant Engine (SQE) ensembles, feature-based scoring, and automated outcome labeling to continuously
+            refine its predictive accuracy. Outputs include probabilistic bands (P50–P95), terminal distributions, and
+            structured confidence intervals accessible via dashboard or API.
           </p>
           <ul className="mt-4 list-disc pl-5 text-sm text-white/70 space-y-2">
             <li><span className="text-white">Core mission:</span> translate uncertainty into actionable foresight through interpretable AI.</li>
@@ -71,7 +71,7 @@ export default function DocsPage() {
         <div id="technical" className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-8">
           <h2 className="text-2xl font-brand">Technical Overview (Simplified)</h2>
           <ul className="mt-3 list-disc pl-5 text-sm text-white/70 space-y-2">
-            <li>Core simulation framework executes large‑scale Monte‑Carlo path ensembles per symbol and horizon.</li>
+            <li>Core simulation framework executes large-scale Simetrix Quant Engine (SQE) path ensembles per symbol and horizon.</li>
             <li>Dynamic weighting and error tracking enable model adaptation over time (“self‑learning”).</li>
             <li>Feature store and labeling pipeline manage metrics, outcomes, and audit trails securely in‑house.</li>
             <li>REST API provides endpoints for forecasts, accuracy reports, and model metadata.</li>
@@ -91,3 +91,6 @@ export default function DocsPage() {
     </main>
   );
 }
+
+
+

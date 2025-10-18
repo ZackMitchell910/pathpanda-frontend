@@ -35,18 +35,35 @@ async function fetchLimits(apiBase: string, apiKey: string): Promise<Limits> {
   return r.json();
 }
 
-export default function QuotaCard() {
-  const apiBase = resolveApiBase();
-  const key = resolveApiKey();
+type QuotaCardProps = {
+  apiBase?: string;
+  apiKey?: string;
+};
+
+export default function QuotaCard({ apiBase: apiBaseProp, apiKey: apiKeyProp }: QuotaCardProps = {}) {
+  const apiBase = (apiBaseProp ?? resolveApiBase()).trim();
+  const key = (apiKeyProp ?? resolveApiKey()).trim();
 
   const [data, setData] = useState<Limits | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
+  const sim = data?.daily.simulate ?? null;
+
+  const perMinCaps = data?.per_min_caps;
+  const pct = useMemo(() => {
+    if (!sim) return 0;
+    const lim = Math.max(0, sim.limit || 0);
+    const used = Math.max(0, sim.used || 0);
+    return lim > 0 ? Math.min(100, Math.round((used / lim) * 100)) : 0;
+  }, [sim?.limit, sim?.used]);
+  const resetLeft = data ? Math.max(0, (data.reset_secs || 0) - tick) : 0;
+
   // load once
   useEffect(() => {
     if (!apiBase || !key) {
       setErr("Missing API base or API key");
+      setData(null);
       return;
     }
     fetchLimits(apiBase, key)
@@ -83,15 +100,10 @@ export default function QuotaCard() {
     );
   }
 
-  const { per_min_caps } = data;
-  const sim = data.daily.simulate;
-  const pct = useMemo(() => {
-    const lim = Math.max(0, sim.limit || 0);
-    const used = Math.max(0, sim.used || 0);
-    return lim > 0 ? Math.min(100, Math.round((used / lim) * 100)) : 0;
-  }, [sim.limit, sim.used]);
+  if (!sim || !perMinCaps) {
+    return null;
+  }
 
-  const resetLeft = Math.max(0, (data.reset_secs || 0) - tick);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -101,7 +113,7 @@ export default function QuotaCard() {
             Plan: <span className="uppercase">{data.plan}</span>
           </div>
           <div className="text-white/70 text-xs">
-            Per-minute caps — base: {per_min_caps.base}, simulate: {per_min_caps.simulate}, cron: {per_min_caps.cron}
+            Per-minute caps – base: {perMinCaps.base}, simulate: {perMinCaps.simulate}, cron: {perMinCaps.cron}
           </div>
         </div>
         <div className="text-xs text-white/60">Resets in {fmtHMS(resetLeft)}</div>

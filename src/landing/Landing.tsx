@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, ShieldCheck, LineChart, Sparkles, Cpu, Lock, BrainCircuit, BarChart3, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -107,7 +107,7 @@ export default function Landing() {
                 </div>
                 <div className="inline-flex items-center gap-3">
                   <span className="inline-flex items-center gap-1"><Cpu className="h-3.5 w-3.5"/> HPC</span>
-                  <span className="inline-flex items-center gap-1"><Lock className="h-3.5 w-3.5"/> AES‑256</span>
+                  <span className="inline-flex items-center gap-1"><Lock className="h-3.5 w-3.5"/> AESΓÇæ256</span>
                 </div>
               </div>
               <FanChartSketch />
@@ -121,7 +121,7 @@ export default function Landing() {
       {/* Features */}
       <FeaturesSection />
 
-      {/* Integrations — uses your existing component with hover amber aura */}
+      {/* Integrations ΓÇö uses your existing component with hover amber aura */}
       <section className="mx-auto max-w-7xl px-6 md:px-8 py-16">
         <div className="text-center mb-8">
           <h2 className="font-brand text-2xl md:text-3xl">Built on proven infrastructure</h2>
@@ -272,16 +272,16 @@ function SnippetCard() {
       <div className="mb-2 text-xs text-white/60">API in one call</div>
       <pre className="whitespace-pre-wrap rounded-xl border border-white/10 bg-black/60 p-4 text-[12px] leading-relaxed text-emerald-300/90">
 {`GET /quant/daily/today
-X-API-Key: ••••••••••••
+X-API-Key: SIM6cxQ98sDzN0HpmULCBBMG1CmX1iS3
 
-→ { symbol: "NVDA", prob_up_30d: 0.62, p95: 165.4 }`}
+!SIM { symbol: "NVDA",Probability Up:62%, Predicted Price:182, Bullish Price:195.4 }`}
       </pre>
     </div>
   );
 }
 
 function FanChartSketch() {
-  // Simple SVG fan with symmetrical percentiles (not downward‑angled)
+  // Simple SVG fan with symmetrical percentiles (not downwardΓÇæangled)
   return (
     <svg className="h-full w-full" viewBox="0 0 800 360" role="img" aria-label="Fan chart visualization">
       <defs>
@@ -338,11 +338,11 @@ export function ProductsSection() {
       name: "Simetrix Dash",
       description: "Forecasting console for Simetrix Quant Engine (SQE) simulations, drivers, and daily quant signals.",
       href: "/app",
-      status: "Alpha preview",
+      status: "Live",
       icon: LineChart,
     },
     {
-      name: "Simetrix Trader",
+      name: "AI Trader",
       description: "Live execution cockpit for automated strategies, guardrails, and post-trade analytics.",
       href: "/trader",
       status: "Alpha preview",
@@ -408,7 +408,7 @@ export function ProductsSection() {
 function FeaturesSection() {
   const items = [
     { title: "Autonomous Forecasting Engine", desc: "Unattended runs with cohort logging and settlement.", Icon: LineChart },
-    { title: "Self‑Learning AI", desc: "Online updates as new data arrives; improves over time (no ML jargon required).", Icon: BrainCircuit },
+    { title: "Self Learning", desc: "Online updates as new data arrives; improves over time (no ML jargon required).", Icon: BrainCircuit },
     { title: "Explainability & Drivers", desc: "Attribution to factors, regimes, and scenarios.", Icon: BarChart3 },
     { title: "Analysts • Traders • Institutions", desc: "Role‑ready workflows with quotas and audit trails.", Icon: Users },
   ];
@@ -472,7 +472,7 @@ function PricingSection() {
     <section id="pricing" className="mx-auto max-w-7xl px-6 md:px-8 py-20 border-t border-white/10">
       <div className="text-center mb-12">
         <h2 className="font-brand text-3xl md:text-4xl">Pricing</h2>
-        <p className="mt-2 text-white/70">Early access pricing — we can tune together.</p>
+        <p className="mt-2 text-white/70">Early access pricing ΓÇö we can tune together.</p>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {tiers.map((t) => (
@@ -505,6 +505,7 @@ function PricingSection() {
     </section>
   );
 }
+
 
 
 

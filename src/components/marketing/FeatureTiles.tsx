@@ -3,7 +3,7 @@ import { LineChart, BrainCircuit, BarChart3, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const features: Array<{ title: string; desc: string; Icon: LucideIcon }> = [
-  { title: "Autonomous Simulation Framework", desc: "Scalable Monte Carlo simulations with cohort analysis and real-time reconciliation.", Icon: LineChart },
+  { title: "Autonomous Simulation Framework", desc: "Scalable Simetrix Quant Engine (SQE) simulations with cohort analysis and real-time reconciliation.", Icon: LineChart },
   { title: "Adaptive Learning Engine", desc: "Incremental model refinement via dynamic labeling on streaming data inputs.", Icon: BrainCircuit },
   { title: "Attribution Analytics", desc: "Factor-based explainability across regimes and probabilistic scenarios.", Icon: BarChart3 },
   { title: "Strategic Signal Generation", desc: "Algorithmic candidate selection, ranking, and narrative-driven insights.", Icon: Sparkles },
@@ -47,3 +47,4 @@ export default function FeatureTiles() {
     </section>
   );
 }
+

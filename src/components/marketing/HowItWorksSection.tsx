@@ -87,7 +87,7 @@ export default function HowItWorksSection() {
 
           <Section
             kicker="03 • Simulation Engine"
-            title="Monte-Carlo at machine scale"
+            title="Simetrix Quant Engine at machine scale"
             icon={<Cpu className="h-5 w-5" />}
             body={
               <>
@@ -501,3 +501,4 @@ function FanChartSketch() {
     </svg>
   );
 }
+

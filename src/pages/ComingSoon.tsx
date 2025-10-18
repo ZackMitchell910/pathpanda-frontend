@@ -49,7 +49,7 @@ export default function ComingSoon() {
 
             <ul className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
               {[
-                ["Monte Carlo Fan Charts", "Validated paths, percentile bands, export-ready"],
+                ["SQE Fan Charts", "Validated paths, percentile bands, export-ready"],
                 ["Targets & Odds", "Vol-aware ladders with time-to-hit stats"],
                 ["Daily Quant Signal", "IBM/Qiskit hook + classical blend"],
               ].map(([title, note]) => (
@@ -91,3 +91,4 @@ export default function ComingSoon() {
     </div>
   );
 }
+

@@ -1,14 +1,6 @@
-# Simetrix Frontend
-
-This project is the web dashboard for Simetrix. It is built with React, TypeScript, and Vite.
-
-> **New teammate?** Start with [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for local setup, key management, and deployment tips.
-
----
-
 # React + TypeScript + Vite
 
-This starter originally provided a minimal setup to get React working in Vite with HMR and some ESLint rules. The notes below come from the base template and are still useful if you want to tweak the Vite config or ESLint rules.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
 

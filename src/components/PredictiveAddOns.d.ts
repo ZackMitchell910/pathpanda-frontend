@@ -19,8 +19,19 @@ declare module "./components/PredictiveAddOns" {
 
   // 1) TerminalDistribution
   export interface TerminalDistributionProps {
-    pathsTerminal: number[]; // one terminal price per simulated path
-    ptiles?: { p05?: number; p50?: number; p95?: number };
+    prices: number[];
+    density?: {
+      mode?: number;
+      median?: number;
+      mean?: number;
+      variance?: number;
+      kde?: { x: number[]; y: number[] };
+      hpd?: Record<string, [number, number]>;
+      histogram?: { bins: number[]; counts: number[] };
+      [key: string]: unknown;
+    } | null;
+    scenarioMeta?: Array<{ scenario_id?: string; weight?: number; label?: string; color?: string }> | null;
+    spot?: number | null;
   }
   export const TerminalDistribution: React.FC<TerminalDistributionProps>;
 
@@ -42,8 +53,20 @@ declare module "./components/PredictiveAddOns" {
 
   // 4) ScenarioTiles
   export interface ScenarioTilesProps {
-    artifact: Artifact;
-    reps: { label: string; path: [number, number][] }[]; // bear/base/bull representative paths
+    scenarios: Array<{
+      id: string;
+      label: string;
+      weight: number | null;
+      description?: string | null;
+      narrative?: string | null;
+      drivers?: { feature: string; weight: number }[] | null;
+      color?: string | null;
+    }>;
+    activeMap: Record<string, boolean>;
+    selectedId: string | null;
+    onToggle: (id: string) => void;
+    onSelect: (id: string) => void;
+    onReset?: () => void;
   }
   export const ScenarioTiles: React.FC<ScenarioTilesProps>;
 
@@ -56,7 +79,7 @@ declare module "./components/PredictiveAddOns" {
 
   // 6) DriversWaterfall
   export interface DriversWaterfallProps {
-    drivers: { name: string; weight: number }[]; // positive/negative contributions
+    drivers: { feature: string; weight: number }[]; // positive/negative contributions
   }
   export const DriversWaterfall: React.FC<DriversWaterfallProps>;
 

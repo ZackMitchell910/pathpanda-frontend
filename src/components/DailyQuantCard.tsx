@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSimetrixClient } from "@/dashboard/DashboardProvider";
 
 type MaybeNumber = number | string | null | undefined;
 
@@ -85,37 +86,45 @@ const extractSchedulerTimestamps = (context?: DailyQuantContext | null) => {
 };
 
 export default function DailyQuantCard({
-  apiBase,
-  getHeaders,
   onOpen,
 }: {
-  apiBase: string;
-  getHeaders: () => Record<string, string>;
   onOpen: (symbol: string, horizon: number) => void;
 }) {
+  const client = useSimetrixClient();
   const [data, setData] = useState<DailyQuantResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | undefined>();
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         setErr(undefined);
-        const resp = await fetch(`${apiBase}/quant/daily/today`, { headers: getHeaders() });
-        const json = (await resp.json()) as DailyQuantResponse;
+        const resp = await client.request("/quant/daily/today");
+        const text = await resp.text();
+        const json = text ? ((JSON.parse(text) as DailyQuantResponse)) : ({} as DailyQuantResponse);
         if (!resp.ok) {
           const detail = (json as any)?.detail ?? resp.statusText;
           throw new Error(typeof detail === "string" ? detail : "Request failed");
         }
-        setData(json);
+        if (!cancelled) {
+          setData(json);
+        }
       } catch (error: any) {
-        setErr(error?.message || String(error));
+        if (!cancelled) {
+          setErr(error?.message || String(error));
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     })();
-  }, [apiBase, getHeaders]);
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   const { equity, crypto } = useMemo(() => {
     if (!data) return { equity: null, crypto: null };

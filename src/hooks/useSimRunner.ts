@@ -1,8 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
 import { throttle } from "@/utils/throttle";
-import type { MCArtifact, RunSummary, SimMode } from "@/types/simulation";
+import type {
+  MCArtifact,
+  RunSummary,
+  SimMode,
+  SimRequestPayload,
+} from "@/types/simulation";
 import type { SimetrixClient } from "@/api/simetrixClient";
+import { resolveApiKey } from "@/utils/apiConfig";
 
 type UseSimRunnerConfig = {
   client: SimetrixClient;
@@ -32,6 +38,25 @@ type TrainOptions = {
 
 const QUICK_LOOKBACK_DAYS = 180;
 const DEEP_LOOKBACK_DAYS = 3650;
+
+type TelemetryLevel = "info" | "warning" | "error";
+type TelemetryPhase =
+  | "train"
+  | "predict"
+  | "simulate"
+  | "stream"
+  | "status"
+  | "artifact"
+  | "summary";
+
+type JobTelemetryEvent = {
+  phase: TelemetryPhase;
+  level: TelemetryLevel;
+  message: string;
+  detail?: Record<string, unknown>;
+  runId?: string | null;
+  symbol?: string;
+};
 
 const clampLookback = (days: number) => {
   const d = Math.floor(Number(days));
@@ -63,9 +88,12 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
   const [art, setArt] = useState<MCArtifact | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [runProfile, setRunProfile] = useState<SimMode | null>(null);
   const [recentRuns, setRecentRuns] = useState<RunSummary[]>([]);
 
   const sseAbortRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef<string | null>(null);
+  const runProfileRef = useRef<SimMode | null>(null);
 
   const appendLog = useCallback((message: string) => {
     setLogMessages((prev) => {
@@ -77,6 +105,76 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
       return [...prev, message];
     });
   }, []);
+
+  useEffect(() => {
+    runIdRef.current = runId;
+  }, [runId]);
+
+  useEffect(() => {
+    runProfileRef.current = runProfile ?? null;
+  }, [runProfile]);
+
+  const sendTelemetry = useCallback(
+    (event: JobTelemetryEvent) => {
+      const payload = {
+        ...event,
+        runId: event.runId ?? runIdRef.current ?? undefined,
+        timestamp: new Date().toISOString(),
+      };
+      client
+        .postJson("/telemetry/events", payload)
+        .catch((err) => {
+          const logFn =
+            event.level === "error"
+              ? console.error
+              : event.level === "warning"
+              ? console.warn
+              : console.log;
+          logFn("[telemetry]", payload, err?.message ?? err);
+        });
+    },
+    [client]
+  );
+
+  const recordSimulationUsage = useCallback(
+    async (args: {
+      runId: string;
+      symbol: string;
+      profile: SimMode;
+      horizonDays: number;
+      nPaths: number;
+    }) => {
+      const body = {
+        run_id: args.runId,
+        symbol: args.symbol.toUpperCase(),
+        profile: args.profile,
+        horizon_days: args.horizonDays,
+        n_paths: args.nPaths,
+        status: "success",
+      };
+      try {
+        await client.postJson("/usage/simulations", body);
+        sendTelemetry({
+          phase: "simulate",
+          level: "info",
+          message: "Simulation usage recorded",
+          detail: body,
+          runId: args.runId,
+        });
+      } catch (err: any) {
+        const message = err?.message ?? String(err);
+        appendLog(`Quota record failed: ${message}`);
+        sendTelemetry({
+          phase: "simulate",
+          level: "warning",
+          message: "Simulation usage record failed",
+          detail: { ...body, error: message },
+          runId: args.runId,
+        });
+      }
+    },
+    [client, sendTelemetry, appendLog]
+  );
 
   const throttledLog = useMemo(
     () => throttle((m: string) => appendLog(m), 120),
@@ -120,12 +218,18 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
         return true;
       } catch (error: any) {
         throttledLog(`Training error: ${error?.message || error}`);
+        sendTelemetry({
+          phase: "train",
+          level: "error",
+          message: error?.message || String(error),
+          detail: { symbol, lookbackDays: resolvedLookback },
+        });
         return false;
       } finally {
         setIsTraining(false);
       }
     },
-    [client, throttledLog]
+    [client, throttledLog, sendTelemetry]
   );
 
   const runPredict = useCallback(
@@ -161,13 +265,25 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
             Number.isFinite(pu) ? (pu * 100).toFixed(2) : "?"
           }%`
         );
+        sendTelemetry({
+          phase: "predict",
+          level: "info",
+          message: "Prediction completed",
+          detail: { symbol, horizonDays, probUpNext: Number.isFinite(pu) ? pu : null },
+        });
       } catch (error: any) {
         throttledLog(`Error: ${error?.message || error}`);
+        sendTelemetry({
+          phase: "predict",
+          level: "error",
+          message: error?.message || String(error),
+          detail: { symbol, horizonDays },
+        });
       } finally {
         setIsPredicting(false);
       }
     },
-    [client, throttledLog]
+    [client, throttledLog, sendTelemetry]
   );
 
   const runSimulation = useCallback(
@@ -206,26 +322,36 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
       setCurrentPrice(null);
       setRunId(null);
       setProbUpNext(null);
+      setRunProfile(null);
+      runProfileRef.current = null;
+
+      const profile: SimMode = mode === "deep" ? "deep" : "quick";
 
       try {
         const lookbackDays =
-          mode === "deep" ? DEEP_LOOKBACK_DAYS : QUICK_LOOKBACK_DAYS;
+          profile === "deep" ? DEEP_LOOKBACK_DAYS : QUICK_LOOKBACK_DAYS;
         const trained = await trainModel({
           symbol,
           lookbackDays,
           label:
-            mode === "deep"
+            profile === "deep"
               ? `${symbol.toUpperCase()}: deep training (${lookbackDays}d history)`
               : `${symbol.toUpperCase()}: quick warm-up (${lookbackDays}d history)`,
         });
         if (!trained) {
           throttledLog("Simulation aborted because training failed.");
+          sendTelemetry({
+            phase: "train",
+            level: "error",
+            message: "Simulation aborted because training failed.",
+            detail: { symbol, mode: profile, profile, lookbackDays },
+          });
           setIsSimulating(false);
           return;
         }
 
-        const payload: Record<string, unknown> = {
-          mode,
+        const payload: (SimRequestPayload & { x_handles?: string }) = {
+          mode: profile,
           symbol: symbol.toUpperCase(),
           horizon_days: Number(horizonDays),
           n_paths: Number(boundedPaths),
@@ -249,12 +375,30 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
         }
         const { run_id } = JSON.parse(startTxt);
         setRunId(run_id);
+        runIdRef.current = run_id;
+        setRunProfile(profile);
+        runProfileRef.current = profile;
         throttledLog(`Queued run_id: ${run_id} [${mode.toUpperCase()}]`);
+        sendTelemetry({
+          phase: "simulate",
+          level: "info",
+          message: "Simulation queued",
+          detail: { mode: profile, profile, symbol, horizonDays, nPaths: boundedPaths },
+          runId: run_id,
+        });
 
         abortStream();
         sseAbortRef.current = new AbortController();
+        let streamFailureMessage: string | null = null;
         try {
-        await fetchEventSource(client.resolvePath(`/simulate/${run_id}/stream`), {
+        const apiKeyForStream = resolveApiKey();
+        const streamParams = new URLSearchParams({ profile });
+        if (apiKeyForStream) {
+          streamParams.append("api_key", apiKeyForStream);
+        }
+        const streamQuery = streamParams.toString();
+        const streamPath = `/simulate/${run_id}/stream${streamQuery ? `?${streamQuery}` : ""}`;
+        await fetchEventSource(client.resolvePath(streamPath), {
           headers: client.getHeaders(),
           signal: sseAbortRef.current.signal,
           openWhenHidden: true,
@@ -282,15 +426,24 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
                   `Progress: ${Math.round(prog)}%`,
                 ];
                 if (typeof data.detail === "string" && data.detail.trim()) {
+                  if (!streamFailureMessage && data.status.toLowerCase() === "error") {
+                    streamFailureMessage = data.detail.trim();
+                  }
                   parts.push(`Detail: ${data.detail.trim()}`);
                 }
                 if (typeof data.error === "string" && data.error.trim()) {
+                  if (!streamFailureMessage) {
+                    streamFailureMessage = data.error.trim();
+                  }
                   parts.push(`Error: ${data.error.trim()}`);
                 }
                 throttledLog(parts.join(" | "));
               } else if (typeof data.detail === "string" && data.detail.trim()) {
                 throttledLog(`Detail: ${data.detail.trim()}`);
               } else if (typeof data.error === "string" && data.error.trim()) {
+                if (!streamFailureMessage) {
+                  streamFailureMessage = data.error.trim();
+                }
                 throttledLog(`Error: ${data.error.trim()}`);
               }
             } catch {
@@ -301,35 +454,86 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
             throttledLog(
               `Stream error: ${error?.message || error}. Ending stream...`
             );
+            if (!streamFailureMessage) {
+              streamFailureMessage = error?.message || String(error);
+            }
+            sendTelemetry({
+              phase: "stream",
+              level: "error",
+              message: error?.message || String(error),
+              detail: { runId: run_id, mode: profile, profile },
+              runId: run_id,
+            });
             abortStream();
           },
           onclose: () => throttledLog("Stream closed."),
         });
         } catch (error: any) {
           throttledLog(`Stream failed: ${error?.message || error}. Continuing...`);
+          if (!streamFailureMessage) {
+            streamFailureMessage = error?.message || String(error);
+          }
+          sendTelemetry({
+            phase: "stream",
+            level: "error",
+            message: error?.message || String(error),
+            detail: { runId: run_id, mode: profile, profile },
+            runId: run_id,
+          });
         } finally {
           abortStream();
+        }
+        if (streamFailureMessage) {
+          throw new Error(streamFailureMessage);
         }
 
         const fetchArtifactWithRetry = async (timeoutMs = 20000): Promise<MCArtifact> => {
           const startedAt = Date.now();
           let attempt = 0;
           const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+          const pendingStatuses = new Set([202, 403, 404]);
           while (true) {
-            const resp = await client.request(`/simulate/${run_id}/artifact`);
+            const resp = await client.request(
+              `/simulate/${run_id}/artifact?profile=${encodeURIComponent(profile)}`
+            );
             const artTxt = await safeText(resp);
-            if (resp.status === 202) {
-              throttledLog("Artifact pending... waiting a moment.");
+            if (pendingStatuses.has(resp.status)) {
+              throttledLog(
+                resp.status === 202
+                  ? "Artifact pending... waiting a moment."
+                  : `Artifact not ready yet (HTTP ${resp.status}); retrying...`
+              );
             } else if (!resp.ok) {
-              if (looksLikeHTML(artTxt)) throw new Error("Misrouted to HTML. Check API base.");
+              if (looksLikeHTML(artTxt)) throw new Error("Misrouted to HTML. Check VITE_API_BASE and CORS.");
+              sendTelemetry({
+                phase: "artifact",
+                level: "error",
+                message: `Artifact fetch failed: ${resp.status}`,
+                detail: {
+                  status: resp.status,
+                  body: artTxt?.slice(0, 200),
+                  profile,
+                },
+                runId: run_id,
+              });
               throw new Error(`Artifact fetch failed: ${resp.status} - ${artTxt}`);
             } else {
+              if (looksLikeHTML(artTxt)) {
+                throw new Error("Misrouted to HTML. Check VITE_API_BASE and CORS.");
+              }
               let parsed: unknown = null;
               if (artTxt) {
                 try {
                   parsed = JSON.parse(artTxt);
                 } catch {
                   throttledLog("Artifact parse error; retrying...");
+                  sendTelemetry({
+                    phase: "artifact",
+                    level: "warning",
+                    message: "Artifact parse error",
+                    detail: { attempt, runId: run_id, profile },
+                    runId: run_id,
+                  });
                 }
               }
               const candidate = parsed as MCArtifact | null;
@@ -345,6 +549,13 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
               throttledLog("Artifact response not complete yet; retrying...");
             }
             if (Date.now() - startedAt > timeoutMs) {
+              sendTelemetry({
+                phase: "artifact",
+                level: "error",
+                message: "Timed out waiting for artifact",
+                detail: { attempt, runId: run_id, profile },
+                runId: run_id,
+              });
               throw new Error("Timed out waiting for artifact");
             }
             attempt += 1;
@@ -353,7 +564,9 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
         };
 
         try {
-        const statusResp = await client.request(`/simulate/${run_id}/status`);
+          const statusResp = await client.request(
+            `/simulate/${run_id}/status?profile=${encodeURIComponent(profile)}`
+          );
           const statusTxt = await safeText(statusResp);
           if (statusResp.ok && statusTxt) {
             try {
@@ -374,14 +587,42 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
                   parseErr instanceof Error ? parseErr.message : String(parseErr)
                 }`
               );
+              sendTelemetry({
+                phase: "status",
+                level: "warning",
+                message: "Status parse error",
+                detail: {
+                  error: parseErr instanceof Error ? parseErr.message : String(parseErr),
+                  profile,
+                },
+                runId: run_id,
+              });
             }
           } else if (!statusResp.ok) {
             throttledLog(
               `Status check failed: ${statusResp.status} - ${statusTxt || "no body"}`
             );
+            sendTelemetry({
+              phase: "status",
+              level: "error",
+              message: "Status endpoint failed",
+              detail: {
+                status: statusResp.status,
+                body: statusTxt || null,
+                profile,
+              },
+              runId: run_id,
+            });
           }
         } catch (statusErr: any) {
           throttledLog(`Status check failed: ${statusErr?.message || statusErr}`);
+          sendTelemetry({
+            phase: "status",
+            level: "error",
+            message: statusErr?.message || String(statusErr),
+            detail: { profile },
+            runId: run_id,
+          });
         }
 
         const artifact = await fetchArtifactWithRetry();
@@ -391,17 +632,38 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
         setCurrentPrice(
           (artifact as any).spot ?? artifact.median_path?.[0]?.[1] ?? null
         );
-        const puNext = Number((artifact as any)?.prob_up_next);
+        const puNextCandidate =
+          (artifact as any)?.fan_chart?.prob_up_next ??
+          (artifact as any)?.prob_up_next ??
+          (artifact as any)?.probUpNext;
+        const puNext = Number(puNextCandidate);
         if (Number.isFinite(puNext)) setProbUpNext(puNext);
         throttledLog(
           `Artifact loaded for run ${run_id}. median_path=${artifact?.median_path?.length ?? 0} pts`
         );
-        try {
-          if (artifact && run_id) {
-            client.request(`/runs/${run_id}/summary`).catch(() => {});
-          }
-        } catch {
-          // ignore
+        sendTelemetry({
+          phase: "artifact",
+          level: "info",
+          message: "Artifact loaded",
+          detail: {
+            medianCount: artifact?.median_path?.length ?? 0,
+            symbol,
+            profile,
+          },
+          runId: run_id,
+        });
+        if (artifact && run_id) {
+          client
+            .request(`/runs/${run_id}/summary?profile=${encodeURIComponent(profile)}`)
+            .catch((summaryErr) => {
+              sendTelemetry({
+                phase: "summary",
+                level: "warning",
+                message: summaryErr?.message || String(summaryErr),
+                detail: { profile },
+                runId: run_id,
+              });
+            });
         }
 
         const terminalPoint =
@@ -421,14 +683,43 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
             typeof terminalPoint === "number" && Number.isFinite(terminalPoint)
               ? terminalPoint
               : null,
+          profile,
         };
         setRecentRuns((prev) => {
           const filtered = prev.filter((r) => r.id !== summary.id);
           return [summary, ...filtered].slice(0, 8);
         });
+        await recordSimulationUsage({
+          runId: run_id,
+          symbol,
+          profile,
+          horizonDays:
+            Number(artifact.horizon_days ?? horizonDays) || Number(horizonDays),
+          nPaths:
+            Number((artifact as any)?.n_paths ?? boundedPaths) || Number(boundedPaths),
+        });
         throttledLog(`Run ${run_id} finalized.`);
+        sendTelemetry({
+          phase: "summary",
+          level: "info",
+          message: "Simulation finalized",
+          detail: { symbol, mode: profile, profile, horizonDays, runId: run_id },
+          runId: run_id,
+        });
       } catch (error: any) {
         throttledLog(`Error: ${error?.message ?? error}`);
+        sendTelemetry({
+          phase: "simulate",
+          level: "error",
+          message: error?.message ?? String(error),
+          detail: {
+            symbol,
+            mode: profile,
+            profile,
+            horizonDays,
+            runId: runIdRef.current,
+          },
+        });
       } finally {
         setIsSimulating(false);
       }
@@ -440,6 +731,8 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
       throttledLog,
       throttledProgress,
       client,
+      sendTelemetry,
+      recordSimulationUsage,
     ]
   );
 
@@ -455,6 +748,7 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
     art,
     currentPrice,
     runId,
+    runProfile,
     recentRuns,
     setRecentRuns,
     runPredict,
@@ -465,6 +759,7 @@ export function useSimRunner({ client }: UseSimRunnerConfig) {
 }
 
 export type UseSimRunnerReturn = ReturnType<typeof useSimRunner>;
+
 
 
 

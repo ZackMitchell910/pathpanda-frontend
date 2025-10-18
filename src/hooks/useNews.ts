@@ -88,25 +88,26 @@ export function useNews({
           headers = { ...headers, "Content-Type": "application/json" };
         }
 
-        if (apiKey) {
+        const trimmedKey = typeof apiKey === "string" ? apiKey.trim() : "";
+        const hasApiKey = trimmedKey.length > 0;
+        if (hasApiKey) {
           headers = {
             ...headers,
-            "X-Polygon-Key": apiKey,
+            "X-API-Key": trimmedKey,
           };
-        } else if (
-          !Object.keys(headers).some((key) => key.toLowerCase() === "x-api-key") &&
-          !Object.keys(headers).some((key) => key.toLowerCase() === "x-polygon-key")
-        ) {
-          onLog?.("News fetch missing Polygon API key; requests may be rate limited or fail.");
         }
 
         const request = client
-          ? (path: string) => client.request(path, { headers })
-          : (path: string) =>
-              fetch(path, {
-                headers,
-                credentials: "include",
-              });
+          ? (path: string) =>
+              client.request(path, {
+                 headers,
+                 credentials: hasApiKey ? "omit" : undefined,
+               })
+           : (path: string) =>
+               fetch(path, {
+                 headers,
+                 credentials: hasApiKey ? "omit" : "include",
+               });
         const r = await request(u.toString());
         const txt = await r.text().catch(() => "");
         if (!r.ok) {

@@ -2,6 +2,8 @@
 // File: src/components/SimSummaryCard.tsx
 // ==========================
 import * as React from "react";
+import { useSimetrixClient } from "@/dashboard/DashboardProvider";
+import type { SimMode } from "@/types/simulation";
 
 type SummaryResponse = {
   run_id: string;
@@ -24,25 +26,39 @@ type SummaryResponse = {
 };
 
 type Props = {
-  apiBase: string;
   runId: string; // required once you have a run
-  headers?: HeadersInit; // pass if your endpoint is protected
   maxRetries?: number; // default 10
   retryMsBase?: number; // default 500
+  profile?: SimMode | "quick" | "deep";
 };
 
 export default function SimSummaryCard({
-  apiBase,
   runId,
-  headers,
   maxRetries = 10,
   retryMsBase = 500,
+  profile = "quick",
 }: Props) {
+  const client = useSimetrixClient();
   const [data, setData] = React.useState<SummaryResponse | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [attempt, setAttempt] = React.useState<number>(0);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState<boolean>(false);
+
+  const buildPath = React.useCallback(
+    (force: boolean) => {
+      const base = force ? `/runs/${runId}/summary?refresh=1` : `/runs/${runId}/summary`;
+      const joiner = base.includes("?") ? "&" : "?";
+      return `${base}${joiner}profile=${encodeURIComponent(profile ?? "quick")}`;
+    },
+    [runId, profile]
+  );
+
+  React.useEffect(() => {
+    setAttempt(0);
+    setData(null);
+    setError(null);
+  }, [runId, profile]);
 
   // Fetch (with pending handling + backoff)
   React.useEffect(() => {
@@ -53,10 +69,8 @@ export default function SimSummaryCard({
       try {
         setLoading(true);
         setError(null);
-        const url = force
-          ? `${apiBase}/runs/${runId}/summary?refresh=1`
-          : `${apiBase}/runs/${runId}/summary`;
-        const r = await fetch(url, { headers, credentials: "include" });
+        const path = buildPath(force);
+        const r = await client.request(path);
         // treat "not ready yet" as pending
         if ([202, 404, 425].includes(r.status)) {
           if (attempt < maxRetries && !cancelled) {
@@ -87,7 +101,7 @@ export default function SimSummaryCard({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, runId, headers, attempt, maxRetries, retryMsBase]);
+  }, [client, runId, attempt, maxRetries, retryMsBase, buildPath]);
 
   // Manual refresh (forces recompute on the backend if supported)
   const handleRefresh = React.useCallback(async () => {
@@ -96,10 +110,7 @@ export default function SimSummaryCard({
       setAttempt(0);
       setData(null);
       setError(null);
-      const r = await fetch(`${apiBase}/runs/${runId}/summary?refresh=1`, {
-        headers,
-        credentials: "include",
-      });
+      const r = await client.request(buildPath(true));
       if (!r.ok && ![202, 404, 425].includes(r.status)) {
         const txt = await safeText(r);
         throw new Error(`HTTP ${r.status} ${txt || ""}`.trim());
@@ -111,7 +122,7 @@ export default function SimSummaryCard({
     } finally {
       setRefreshing(false);
     }
-  }, [apiBase, runId, headers]);
+  }, [client, runId, buildPath]);
 
   // Placeholder while pending / no data
   if (loading || !data) {

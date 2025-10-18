@@ -38,6 +38,9 @@ import type { SimMode, MCArtifact, RunSummary } from "@/types/simulation";
 // Lazy charts
 const FanChart = React.lazy(() => import("./components/FanChart"));
 const TerminalDistribution = React.lazy(() => import("./components/TerminalDistribution"));
+const ProbabilityHeatmap = React.lazy(() =>
+  import("./components/ProbabilityHeatmap").then((m) => ({ default: m.ProbabilityHeatmap }))
+);
 const ScenarioTiles = React.lazy(() =>
   import("./components/PredictiveAddOns").then((m) => ({ default: m.ScenarioTiles }))
 );
@@ -93,6 +96,16 @@ type DiagnosticsSnapshot = {
   [key: string]: unknown;
 };
 
+type ScenarioView = {
+  id: string;
+  label: string;
+  weight: number | null;
+  description: string | null;
+  narrative: string | null;
+  drivers: { feature: string; weight: number }[];
+  color: string | null;
+};
+
 const API_BASE = resolveApiBase();
 const api = (p: string) => `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 
@@ -101,12 +114,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function fetchArtifactWithRetry(
   runId: string,
   headers: Record<string, string>,
+  profile: SimMode | "quick" | "deep" = "quick",
   maxAttempts = 6,
   baseDelayMs = 400
 ): Promise<MCArtifact> {
   let attempt = 0;
   let lastError: unknown = null;
-  const url = api(`/simulate/${encodeURIComponent(runId)}/artifact`);
+  const url = api(
+    `/simulate/${encodeURIComponent(runId)}/artifact?profile=${encodeURIComponent(
+      profile ?? "quick"
+    )}`
+  );
   const pendingStatuses = new Set([202, 403, 404]);
 
   while (attempt < maxAttempts) {
@@ -185,37 +203,54 @@ const Card: React.FC<{ id?: string; title?: string; actions?: React.ReactNode; c
 const EB: React.FC<React.PropsWithChildren> = ({ children }) => <ErrorBoundary>{children}</ErrorBoundary>;
 
 export default function App() {
-  const [simApiKey, setSimApiKey] = useState<string>(() => resolveApiKey());
+  const [ptApiKey, setPtApiKey] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const existing = window.localStorage?.getItem("pt_api_key");
+      if (existing && existing.trim()) return existing.trim();
+      const legacy = window.localStorage?.getItem("smx_api_key");
+      if (legacy && legacy.trim()) {
+        try {
+          window.localStorage?.setItem("pt_api_key", legacy.trim());
+          window.localStorage?.removeItem("smx_api_key");
+        } catch {
+          // ignore storage errors (e.g., private browsing)
+        }
+        return legacy.trim();
+      }
+    }
+    return resolveApiKey() ?? "";
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const trimmed = simApiKey.trim();
+      const trimmed = ptApiKey.trim();
       if (trimmed) {
-        window.localStorage?.setItem("smx_api_key", trimmed);
+        window.localStorage?.setItem("pt_api_key", trimmed);
       } else {
-        window.localStorage?.removeItem("smx_api_key");
+        window.localStorage?.removeItem("pt_api_key");
       }
+      window.localStorage?.removeItem("smx_api_key");
     } catch {
       // ignore storage errors (e.g., private browsing)
     }
-  }, [simApiKey]);
+  }, [ptApiKey]);
 
-  const getAuthHeaders = useCallback(() => apiHeaders(simApiKey), [simApiKey]);
+  const getAuthHeaders = useCallback(() => apiHeaders(ptApiKey), [ptApiKey]);
 
   return (
     <DashboardProvider api={api} getAuthHeaders={getAuthHeaders}>
-      <DashboardApp simApiKey={simApiKey} onSimApiKeyChange={(value) => setSimApiKey(value)} />
+      <DashboardApp ptApiKey={ptApiKey} onPtApiKeyChange={(value) => setPtApiKey(value)} />
     </DashboardProvider>
   );
 }
 
 function DashboardApp({
-  simApiKey,
-  onSimApiKeyChange,
+  ptApiKey,
+  onPtApiKeyChange,
 }: {
-  simApiKey: string;
-  onSimApiKeyChange: (key: string) => void;
+  ptApiKey: string;
+  onPtApiKeyChange: (key: string) => void;
 }) {
   const { sim, getAuthHeaders } = useDashboard();
   // --- helpers ---
@@ -269,7 +304,7 @@ function DashboardApp({
     }
     return "";
   });
-  const hasSimApiKey = useMemo(() => simApiKey.trim().length > 0, [simApiKey]);
+  const hasPtApiKey = useMemo(() => ptApiKey.trim().length > 0, [ptApiKey]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -298,25 +333,26 @@ function DashboardApp({
         setPolygonKey(fallbackCandidate.trim());
       }
     }
-  }, [polygonKey]);  const hasPolygonKey = useMemo(() => polygonKey.trim().length > 0, [polygonKey]);
+  }, [polygonKey]);
+  const hasPolygonKey = useMemo(() => polygonKey.trim().length > 0, [polygonKey]);
 
-  const handleSimApiKeyPrompt = useCallback(() => {
+  const handlePtApiKeyPrompt = useCallback(() => {
     if (typeof window === "undefined") return;
-    const next = window.prompt("Enter your Simetrix API key", simApiKey || "");
+    const next = window.prompt("Enter your PT API key", ptApiKey || "");
     if (next === null) return;
     const trimmed = next.trim();
-    onSimApiKeyChange(trimmed);
-    toast.success(trimmed ? "Simetrix API key saved locally." : "Simetrix API key cleared.");
-  }, [simApiKey, onSimApiKeyChange]);
+    onPtApiKeyChange(trimmed);
+    toast.success(trimmed ? "PT API key saved locally." : "PT API key cleared.");
+  }, [ptApiKey, onPtApiKeyChange]);
 
-  const handleSimApiKeyClear = useCallback(() => {
-    if (!hasSimApiKey) return;
-    if (typeof window !== "undefined" && !window.confirm("Clear stored Simetrix API key?")) {
+  const handlePtApiKeyClear = useCallback(() => {
+    if (!hasPtApiKey) return;
+    if (typeof window !== "undefined" && !window.confirm("Clear stored PT API key?")) {
       return;
     }
-    onSimApiKeyChange("");
-    toast.success("Simetrix API key cleared.");
-  }, [hasSimApiKey, onSimApiKeyChange]);
+    onPtApiKeyChange("");
+    toast.success("PT API key cleared.");
+  }, [hasPtApiKey, onPtApiKeyChange]);
 
   const handlePolygonKeyPrompt = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -336,27 +372,23 @@ function DashboardApp({
     toast.success("Polygon API key cleared.");
   }, [polygonKey]);
 
-  const apiKeyStatusColor = hasSimApiKey
+  const apiKeyStatusColor = hasPtApiKey
     ? hasPolygonKey
       ? "bg-emerald-400"
       : "bg-amber-400"
     : "bg-rose-400";
 
-  const apiKeyStatusTitle = hasSimApiKey
+  const apiKeyStatusTitle = hasPtApiKey
     ? hasPolygonKey
-      ? "Simetrix and Polygon API keys set"
-      : "Simetrix API key set; Polygon API key missing"
+      ? "PT and Polygon API keys set"
+      : "PT API key set; Polygon API key missing"
     : hasPolygonKey
-    ? "Polygon API key set; Simetrix API key missing"
+    ? "Polygon API key set; PT API key missing"
     : "No API keys stored";
 
   const getNewsHeaders = useCallback(() => {
-    const headers: Record<string, string> = { ...apiHeaders(simApiKey) };
-    if (hasPolygonKey) {
-      headers["X-Polygon-Key"] = polygonKey.trim();
-    }
-    return headers;
-  }, [simApiKey, hasPolygonKey, polygonKey]);
+    return { ...apiHeaders(ptApiKey) };
+  }, [ptApiKey]);
 
   const {
     isTraining,
@@ -370,6 +402,7 @@ function DashboardApp({
     art: simArt,
     currentPrice: simCurrentPrice,
     runId,
+    runProfile,
     recentRuns,
     setRecentRuns,
     runPredict,
@@ -443,6 +476,28 @@ function DashboardApp({
     ]
   );
 
+  const handleHeatmapSelect = useCallback(
+    (cell: {
+      thresholdIndex: number;
+      dayIndex: number;
+      threshold: number;
+      day: number;
+      probability: number;
+    }) => {
+      setHeatmapSelection((prev) => {
+        if (
+          prev &&
+          prev.thresholdIndex === cell.thresholdIndex &&
+          prev.dayIndex === cell.dayIndex
+        ) {
+          return null;
+        }
+        return cell;
+      });
+    },
+    []
+  );
+
   const logRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -452,8 +507,15 @@ function DashboardApp({
   }, [sim.abortStream]);
 
   // Focus overlay for charts (no layout shift)
-  type FocusKey = null | "fan" | "terminal" | "drivers" | "scenarios";
+  type FocusKey = null | "fan" | "terminal" | "drivers" | "scenarios" | "heatmap";
   const [focus, setFocus] = useState<FocusKey>(null);
+  const [heatmapSelection, setHeatmapSelection] = useState<{
+    thresholdIndex: number;
+    dayIndex: number;
+    threshold: number;
+    day: number;
+    probability: number;
+  } | null>(null);
 
   // Theme: force dark, apply chart theme
   useEffect(() => { document.documentElement.classList.add("dark"); try { localStorage.setItem("theme", "dark"); } catch {} }, []);
@@ -475,7 +537,7 @@ function DashboardApp({
     apiBase: API_BASE,
     getHeaders: getNewsHeaders,
     onLog: sim.throttledLog,
-    apiKey: hasPolygonKey ? polygonKey : undefined,
+    apiKey: ptApiKey,
   });
   const newsToastRef = useRef<string | null>(null);
   useEffect(() => {
@@ -500,11 +562,20 @@ function DashboardApp({
   const newsItems = useMemo(() => (Array.isArray(newsItemsRaw) ? newsItemsRaw : []), [newsItemsRaw]);
 
   const [artifactOverride, setArtifactOverride] = useState<MCArtifact | null>(null);
+  const [artifactProfileOverride, setArtifactProfileOverride] = useState<SimMode | null>(null);
   const [driversOverride, setDriversOverride] = useState<any[] | null>(null);
   const [probUpOverride, setProbUpOverride] = useState<number | null>(null);
   const [currentPriceOverride, setCurrentPriceOverride] = useState<number | null>(null);
 
   const art = artifactOverride ?? simArt ?? null;
+  const effectiveProfile: SimMode = useMemo(() => {
+    const fromState =
+      runProfile ??
+      artifactProfileOverride ??
+      ((art as any)?.features_ref?.mode as SimMode | undefined) ??
+      ((art as any)?.model_info?.profile as SimMode | undefined);
+    return fromState === "deep" ? "deep" : "quick";
+  }, [runProfile, artifactProfileOverride, art]);
   const drivers = driversOverride ?? simDrivers ?? null;
   const probUp = typeof probUpOverride === "number" ? probUpOverride : simProbUp;
   const currentPrice = typeof currentPriceOverride === "number" ? currentPriceOverride : simCurrentPrice;
@@ -512,13 +583,85 @@ function DashboardApp({
     if (typeof simProbUpNext === "number" && Number.isFinite(simProbUpNext)) {
       return simProbUpNext;
     }
-    const fromArtifact = (art as any)?.prob_up_next ?? (art as any)?.probUpNext;
+    const fromArtifact =
+      (art as any)?.fan_chart?.prob_up_next ??
+      (art as any)?.prob_up_next ??
+      (art as any)?.probUpNext;
     return typeof fromArtifact === "number" && Number.isFinite(fromArtifact) ? fromArtifact : null;
   }, [simProbUpNext, art]);
+  const chartMeta = useMemo(() => {
+    const fallbackPaths = Number.isFinite(Number(paths)) ? Number(paths) : null;
+    const fallbackWindow = effectiveProfile === "deep" ? 3650 : 180;
+    const baseS0 =
+      Array.isArray(art?.median_path) && art?.median_path.length
+        ? Number(art?.median_path?.[0]?.[1])
+        : null;
+    const base = {
+      window_days: fallbackWindow,
+      paths: fallbackPaths,
+      S0: Number.isFinite(baseS0 ?? NaN) ? baseS0 : null,
+      mu_ann: null as number | null,
+      sigma_ann: null as number | null,
+      timespan: "day",
+      seed_hint: null as number | null,
+      mode: effectiveProfile as SimMode,
+    };
+    const ref = art?.features_ref as Record<string, unknown> | undefined;
+    if (ref && typeof ref === "object") {
+      const refModeRaw = typeof ref.mode === "string" ? (ref.mode as string).toLowerCase() : undefined;
+      const normalizedMode = refModeRaw === "deep" ? "deep" : refModeRaw === "quick" ? "quick" : effectiveProfile;
+      const toNumber = (value: unknown) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      };
+      return {
+        window_days: toNumber(ref.window_days) ?? base.window_days,
+        paths: toNumber(ref.paths) ?? base.paths,
+        S0: toNumber(ref.S0) ?? base.S0,
+        mu_ann: toNumber(ref.mu_ann),
+        sigma_ann: toNumber(ref.sigma_ann),
+        timespan: typeof ref.timespan === "string" ? (ref.timespan as string) : base.timespan,
+        seed_hint: toNumber(ref.seed_hint),
+        mode: normalizedMode,
+      };
+    }
+    return base;
+  }, [art, paths, effectiveProfile]);
+  const chartMetaBadges = useMemo(() => {
+    const fmtDecimal = (value: number | null, digits = 3) =>
+      typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "—";
+    const fmtInteger = (value: number | null) =>
+      typeof value === "number" && Number.isFinite(value) ? Math.trunc(value).toString() : "—";
+    const fmtLocale = (value: number | null) =>
+      typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "—";
+    return [
+      { label: "Profile", value: chartMeta.mode.toUpperCase() },
+      {
+        label: "Lookback",
+        value:
+          typeof chartMeta.window_days === "number" && Number.isFinite(chartMeta.window_days)
+            ? `${Math.round(chartMeta.window_days).toLocaleString()}d`
+            : "—",
+      },
+      { label: "Paths", value: fmtLocale(chartMeta.paths) },
+      {
+        label: "S0",
+        value:
+          typeof chartMeta.S0 === "number" && Number.isFinite(chartMeta.S0)
+            ? chartMeta.S0.toFixed(2)
+            : "—",
+      },
+      { label: "mu_ann", value: fmtDecimal(chartMeta.mu_ann) },
+      { label: "sigma_ann", value: fmtDecimal(chartMeta.sigma_ann) },
+      { label: "Timespan", value: chartMeta.timespan?.toString().toUpperCase() ?? "—" },
+      { label: "Seed", value: fmtInteger(chartMeta.seed_hint) },
+    ];
+  }, [chartMeta]);
 
   useEffect(() => {
     if (simArt) {
       setArtifactOverride(null);
+      setArtifactProfileOverride(null);
       setDriversOverride(null);
       setProbUpOverride(null);
       setCurrentPriceOverride(null);
@@ -528,6 +671,7 @@ function DashboardApp({
   useEffect(() => {
     if (!runId) {
       setArtifactOverride(null);
+      setArtifactProfileOverride(null);
       setDriversOverride(null);
       setProbUpOverride(null);
       setCurrentPriceOverride(null);
@@ -538,11 +682,16 @@ function DashboardApp({
     }
     let cancelled = false;
     const headers = getAuthHeaders();
+    const profile = runProfile ?? "quick";
     const hydrate = async () => {
       try {
-        const artf = await fetchArtifactWithRetry(runId, headers);
+        const artf = await fetchArtifactWithRetry(runId, headers, profile);
         if (cancelled) return;
         setArtifactOverride(artf);
+        const derivedProfile =
+          ((artf?.features_ref?.mode ?? artf?.model_info?.profile) as SimMode | undefined) ??
+          (profile === "deep" ? "deep" : "quick");
+        setArtifactProfileOverride(derivedProfile === "deep" ? "deep" : "quick");
         setDriversOverride(
           Array.isArray((artf as any).drivers) ? (artf as any).drivers : null
         );
@@ -569,7 +718,7 @@ function DashboardApp({
     return () => {
       cancelled = true;
     };
-  }, [runId, simArt, getAuthHeaders, sim.throttledLog]);
+  }, [runId, simArt, getAuthHeaders, sim.throttledLog, runProfile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -692,10 +841,42 @@ function DashboardApp({
 
     const scheduler = schedulerTimestamps.length ? schedulerTimestamps : null;
 
+    const timelineSource =
+      (raw as any)?.regime_timeline ??
+      (raw as any)?.regimeTimeline ??
+      (context as any)?.regime_timeline ??
+      (context as any)?.regimeTimeline ??
+      (regimeSrc as any)?.timeline ??
+      (regimeSrc as any)?.series ??
+      null;
+    const regimeTimeline = Array.isArray(timelineSource)
+      ? (timelineSource as any[])
+          .map((entry) => {
+            const dayNum = toNum(
+              entry?.day ?? entry?.day_index ?? entry?.t ?? entry?.x ?? entry?.step
+            );
+            if (dayNum === null) return null;
+            const label =
+              typeof entry?.label === "string" && entry.label.trim()
+                ? entry.label.trim()
+                : typeof entry?.regime === "string" && entry.regime.trim()
+                ? entry.regime.trim()
+                : typeof entry?.name === "string" && entry.name.trim()
+                ? entry.name.trim()
+                : null;
+            const score = toNum(entry?.score ?? entry?.value ?? entry?.prob ?? entry?.weight);
+            return { day: dayNum, label, score };
+          })
+          .filter(
+            (seg): seg is { day: number; label: string | null; score: number | null } =>
+              !!seg && Number.isFinite(seg.day)
+          )
+      : null;
+
     const hasAny =
       [muPre, muPost, sigmaPre, sigmaPost, sentimentAvg7d, sentiment24h, earningsSurprise, earningsDaysSince, macroRff, macroCpi, macroURate].some(
         (v) => typeof v === "number" && Number.isFinite(v)
-      ) || !!regimeName || typeof regimeScore === "number" || (scheduler?.length ?? 0) > 0;
+      ) || !!regimeName || typeof regimeScore === "number" || (scheduler?.length ?? 0) > 0 || (regimeTimeline?.length ?? 0) > 0;
 
     if (!hasAny) return null;
 
@@ -723,6 +904,7 @@ function DashboardApp({
           ? { name: regimeName ?? null, score: regimeScore ?? null }
           : null,
       scheduler,
+      regimeTimeline: regimeTimeline?.length ? regimeTimeline : null,
     };
   }, [art?.diagnostics]);
   const fmtDiag = (value: number | null | undefined) =>
@@ -746,8 +928,209 @@ function DashboardApp({
     return date.toLocaleString();
   };
 
+  const scenarios = useMemo<ScenarioView[]>(() => {
+    const raw = (art as any)?.scenarios;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((scenario: any, idx: number) => {
+        const idRaw =
+          typeof scenario?.id === "string" && scenario.id.trim()
+            ? scenario.id.trim()
+            : typeof scenario?.key === "string" && scenario.key.trim()
+            ? scenario.key.trim()
+            : `scenario-${idx}`;
+        const labelRaw =
+          typeof scenario?.label === "string" && scenario.label.trim()
+            ? scenario.label.trim()
+            : typeof scenario?.name === "string" && scenario.name.trim()
+            ? scenario.name.trim()
+            : `Scenario ${idx + 1}`;
+        const weightCandidate =
+          scenario?.weight ??
+          scenario?.weight_pct ??
+          scenario?.prob ??
+          scenario?.probability ??
+          scenario?.prior ??
+          null;
+        let weight: number | null = null;
+        if (typeof weightCandidate === "number" && Number.isFinite(weightCandidate)) {
+          weight = weightCandidate > 1.001 ? weightCandidate / 100 : weightCandidate;
+          weight = Math.max(0, Math.min(1, weight));
+        }
+        const description =
+          typeof scenario?.description === "string" && scenario.description.trim()
+            ? scenario.description.trim()
+            : null;
+        const narrative =
+          typeof scenario?.narrative === "string" && scenario.narrative.trim()
+            ? scenario.narrative.trim()
+            : null;
+        const driversArr = Array.isArray(scenario?.drivers) ? scenario.drivers : scenario?.factors;
+        const drivers = Array.isArray(driversArr)
+          ? driversArr
+              .map((driver: any) => {
+                const feature =
+                  typeof driver?.feature === "string" && driver.feature.trim()
+                    ? driver.feature.trim()
+                    : typeof driver?.name === "string" && driver.name.trim()
+                    ? driver.name.trim()
+                    : typeof driver?.factor === "string" && driver.factor.trim()
+                    ? driver.factor.trim()
+                    : null;
+                const weightValue = Number(driver?.weight ?? driver?.value ?? driver?.score);
+                if (!feature || !Number.isFinite(weightValue)) return null;
+                return { feature, weight: weightValue };
+              })
+              .filter(
+                (entry): entry is { feature: string; weight: number } =>
+                  !!entry && entry.feature.length > 0
+              )
+          : [];
+        const color =
+          typeof scenario?.color === "string" && scenario.color.trim()
+            ? scenario.color.trim()
+            : null;
+        return {
+          id: idRaw,
+          label: labelRaw,
+          weight,
+          description: description ?? narrative ?? null,
+          narrative: narrative ?? null,
+          drivers,
+          color,
+        };
+      })
+      .filter((scenario) => scenario.id);
+  }, [art]);
+
+  const [activeScenarioMap, setActiveScenarioMap] = useState<Record<string, boolean>>({});
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!scenarios.length) {
+      setActiveScenarioMap({});
+      setSelectedScenarioId(null);
+      return;
+    }
+    setActiveScenarioMap((prev) => {
+      const next: Record<string, boolean> = {};
+      scenarios.forEach((scenario) => {
+        next[scenario.id] = prev[scenario.id] ?? true;
+      });
+      return next;
+    });
+    setSelectedScenarioId((prev) => {
+      if (prev && scenarios.some((scenario) => scenario.id === prev)) return prev;
+      return scenarios[0]?.id ?? null;
+    });
+  }, [scenarios]);
+
+  const handleScenarioToggle = useCallback((scenarioId: string) => {
+    setActiveScenarioMap((prev) => ({
+      ...prev,
+      [scenarioId]: !(prev[scenarioId] ?? true),
+    }));
+  }, []);
+
+  const handleScenarioReset = useCallback(() => {
+    setActiveScenarioMap(() => {
+      const next: Record<string, boolean> = {};
+      scenarios.forEach((scenario) => {
+        next[scenario.id] = true;
+      });
+      return next;
+    });
+  }, [scenarios]);
+
+  const handleScenarioSelect = useCallback((scenarioId: string) => {
+    setSelectedScenarioId(scenarioId);
+  }, []);
+
+  const selectedScenario = useMemo(
+    () => (selectedScenarioId ? scenarios.find((scenario) => scenario.id === selectedScenarioId) ?? null : null),
+    [selectedScenarioId, scenarios]
+  );
+
+  const baseDrivers = Array.isArray(drivers) ? drivers : [];
+  const displayDrivers = useMemo(() => {
+    if (selectedScenario?.drivers?.length) return selectedScenario.drivers;
+    return baseDrivers;
+  }, [selectedScenario, baseDrivers]);
+  const driverSourceLabel = selectedScenario?.label ?? null;
+
+  const fanHorizonDays = useMemo(() => {
+    if (Array.isArray(art?.median_path) && art.median_path.length) {
+      const last = Number(art.median_path.at(-1)?.[0]);
+      if (Number.isFinite(last)) return Math.max(1, last);
+    }
+    if (Number.isFinite(art?.horizon_days)) {
+      return Math.max(1, Number(art?.horizon_days));
+    }
+    const days = coerceDays(horizon);
+    return Number.isFinite(days) ? Math.max(1, Number(days)) : 0;
+  }, [art?.median_path, art?.horizon_days, horizon]);
+
+  const heatmapData = useMemo(() => {
+    const thresholdsRaw = art?.hit_probs?.thresholds_abs;
+    const probsRaw = art?.hit_probs?.probs_by_day;
+    if (!Array.isArray(thresholdsRaw) || !Array.isArray(probsRaw)) return null;
+    const rowCount = Math.min(thresholdsRaw.length, probsRaw.length);
+    const thresholds: number[] = [];
+    const matrix: number[][] = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      const thr = Number(thresholdsRaw[i]);
+      if (!Number.isFinite(thr)) continue;
+      const rowRaw = probsRaw[i];
+      if (!Array.isArray(rowRaw)) continue;
+      const sanitizedRow = rowRaw.map((value) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        if (numeric < 0) return 0;
+        if (numeric > 1) return 1;
+        return numeric;
+      });
+      thresholds.push(thr);
+      matrix.push(sanitizedRow);
+    }
+    const colCount = matrix.reduce((max, row) => Math.max(max, row.length), 0);
+    if (!thresholds.length || colCount === 0) return null;
+    const days = Array.from({ length: colCount }, (_, idx) => idx);
+    return { thresholds, matrix, days };
+  }, [art?.hit_probs?.thresholds_abs, art?.hit_probs?.probs_by_day]);
+
+  useEffect(() => {
+    if (!heatmapData) {
+      setHeatmapSelection(null);
+      return;
+    }
+    setHeatmapSelection((prev) => {
+      if (!prev) return prev;
+      if (prev.thresholdIndex >= heatmapData.thresholds.length) return null;
+      const row = heatmapData.matrix[prev.thresholdIndex] ?? [];
+      if (prev.dayIndex >= row.length) return null;
+      const threshold = heatmapData.thresholds[prev.thresholdIndex];
+      const probability = row[prev.dayIndex] ?? 0;
+      const day = heatmapData.days[prev.dayIndex] ?? prev.day;
+      return { thresholdIndex: prev.thresholdIndex, dayIndex: prev.dayIndex, threshold, probability, day };
+    });
+  }, [heatmapData]);
+
+  useEffect(() => {
+    setHeatmapSelection(null);
+  }, [runId]);
+
+  const heatmapSpot = useMemo(() => {
+    if (Number.isFinite(art?.targets?.spot as number)) return Number(art?.targets?.spot);
+    if (Number.isFinite(currentPrice ?? NaN)) return currentPrice as number;
+    if (Array.isArray(art?.median_path) && art?.median_path?.length) {
+      const first = Number(art?.median_path?.[0]?.[1]);
+      if (Number.isFinite(first)) return first;
+    }
+    return null;
+  }, [art?.targets?.spot, currentPrice, art?.median_path]);
+
   // Export & share
-  const exportChart = async (chartId: "fan" | "terminal" | "drivers" | "ladder") => {
+  const exportChart = async (chartId: "fan" | "terminal" | "drivers" | "ladder" | "heatmap") => {
     try {
       const container = document.querySelector(`[data-chart="${chartId}"]`) as HTMLElement | null;
       if (container) {
@@ -770,9 +1153,36 @@ function DashboardApp({
         case "terminal":
           csvData = [["Price","Frequency"], ...(art.terminal_prices || []).map((p) => [f2(p), "1"])]; break;
         case "drivers":
-          csvData = [["Driver","Weight"], ...drivers.map((d) => [d.feature, f2(d.weight)])]; break;
+          csvData = [
+            ...(driverSourceLabel ? [["Scenario", driverSourceLabel]] : []),
+            ["Driver","Weight"],
+            ...displayDrivers.map((d) => [
+              d.feature,
+              f2(typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0),
+            ]),
+          ];
+          break;
         case "ladder":
           csvData = [["Target","Probability"], ...buildLadderItems(art).map((d) => [d.label, f2(d.p * 100)])]; break;
+        case "heatmap":
+          if (heatmapData) {
+            const header = ["Threshold \\ Day", ...heatmapData.days.map((day) => `D${day}`)];
+            const rows = heatmapData.thresholds.map((thr, idx) => {
+              const pctLabel =
+                typeof heatmapSpot === "number" && heatmapSpot
+                  ? `${Math.round(((thr / heatmapSpot) - 1) * 100)}%`
+                  : `$${f2(thr)}`;
+              const label = `${pctLabel} (${f2(thr)})`;
+              const probs = heatmapData.days.map((_, dayIdx) => {
+                const prob = heatmapData.matrix[idx]?.[dayIdx] ?? 0;
+                const pct = Math.max(0, Math.min(1, prob)) * 100;
+                return f2(pct);
+              });
+              return [label, ...probs];
+            });
+            csvData = [header, ...rows];
+          }
+          break;
       }
       if (csvData.length) {
         const csv = csvData.map((row) => row.join(",")).join("\n");
@@ -785,9 +1195,12 @@ function DashboardApp({
     } catch (e: any) { toast.error(`Export failed: ${e.message || e}`); }
   };
   const shareChart = (chartId: string) => {
-    const state = encodeState({ symbol, horizon, paths, chartId, mode: (art as any)?.plan_used || "deep" });
-    const url = `${window.location.origin}/share?state=${state}`;
-    navigator.clipboard.writeText(url); toast.success("Shareable link copied.");
+    const profileForShare = chartMeta.mode ?? effectiveProfile;
+    const state = encodeState({ symbol, horizon, paths, chartId, mode: profileForShare });
+    const shareUrl = new URL(`${window.location.origin}/share`);
+    shareUrl.searchParams.set("state", state);
+    shareUrl.searchParams.set("profile", profileForShare);
+    navigator.clipboard.writeText(shareUrl.toString()); toast.success("Shareable link copied.");
   };
 
   // Derived KPIs
@@ -898,6 +1311,15 @@ function DashboardApp({
             const nPathsRaw = raw?.n_paths ?? raw?.paths ?? raw?.nPaths ?? raw?.num_paths;
             const probUpRaw = raw?.prob_up_end ?? raw?.probUp ?? raw?.pUp ?? raw?.prob_up;
             const q50Raw = raw?.q50 ?? raw?.median ?? raw?.median_terminal;
+            const profileRaw =
+              raw?.profile ?? raw?.mode ?? raw?.plan ?? raw?.training_profile ?? raw?.trainingProfile;
+            let profile: SimMode | null = null;
+            if (typeof profileRaw === "string") {
+              const lowered = profileRaw.toLowerCase();
+              if (lowered === "deep" || lowered === "quick") {
+                profile = lowered as SimMode;
+              }
+            }
             if (!id || !symbolRaw) return null;
             return {
               id: String(id),
@@ -907,6 +1329,7 @@ function DashboardApp({
               finishedAt: String(raw?.finishedAt || raw?.finished_at || raw?.created_at || raw?.completed_at || ""),
               probUp: Number.isFinite(Number(probUpRaw)) ? Number(probUpRaw) : null,
               q50: Number.isFinite(Number(q50Raw)) ? Number(q50Raw) : null,
+              profile,
             };
           })
           .filter((r: RunSummary | null): r is RunSummary => r !== null);
@@ -963,13 +1386,13 @@ function DashboardApp({
                 className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-transparent px-3 py-1.5 text-sm text-white/80 hover:bg-white/10"
                 items={[
                   {
-                    label: hasSimApiKey ? "Update Simetrix API key" : "Add Simetrix API key",
-                    onClick: handleSimApiKeyPrompt,
+                    label: hasPtApiKey ? "Update PT API key" : "Add PT API key",
+                    onClick: handlePtApiKeyPrompt,
                   },
                   {
-                    label: "Clear Simetrix API key",
-                    onClick: handleSimApiKeyClear,
-                    disabled: !hasSimApiKey,
+                    label: "Clear PT API key",
+                    onClick: handlePtApiKeyClear,
+                    disabled: !hasPtApiKey,
                   },
                   {
                     label: hasPolygonKey ? "Update Polygon API key" : "Add Polygon API key",
@@ -1046,7 +1469,7 @@ function DashboardApp({
                   </div>
                 </div>
                 <div className="mt-4">
-                  <QuotaCard apiBase={API_BASE} apiKey={simApiKey} />
+                  <QuotaCard apiBase={API_BASE} apiKey={ptApiKey} />
                 </div>
               </Card>
             </section>
@@ -1196,6 +1619,23 @@ function DashboardApp({
                         )}
                       </Suspense>
                     </EB>
+                    {diagnostics?.regimeTimeline?.length && fanHorizonDays > 0 && (
+                      <RegimeStrip horizonDays={fanHorizonDays} timeline={diagnostics.regimeTimeline} />
+                    )}
+                    {art && (
+                      <div className="mt-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-white/60">
+                          Simulation Inputs
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-white/70 sm:grid-cols-3">
+                          {chartMetaBadges.map((item) => (
+                            <span key={item.label} className="font-mono">
+                              <span className="text-white/50">{item.label}:</span> {item.value}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {diagnostics && (
                       <details className="mt-3 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white/70">
                         <summary className="cursor-pointer text-sm font-semibold text-white/80">
@@ -1313,11 +1753,53 @@ function DashboardApp({
                   </div>
                 </Card>
 
+                <Card
+                  id="heatmap-card"
+                  title="Touch Odds by Day"
+                  actions={
+                    <CardMenu
+                      items={[
+                        { label: "Focus", onClick: () => setFocus("heatmap"), disabled: !heatmapData },
+                        { label: "Export PNG", onClick: () => exportChart("heatmap"), disabled: !heatmapData },
+                      ]}
+                    />
+                  }
+                  className="lg:col-span-2"
+                >
+                  <div data-chart="heatmap" className="h-56 md:h-64">
+                    <EB>
+                      <Suspense fallback={<ChartFallback />}>
+                        {heatmapData ? (
+                          <ProbabilityHeatmap
+                            thresholds={heatmapData.thresholds}
+                            probsByDay={heatmapData.matrix}
+                            days={heatmapData.days}
+                            spot={heatmapSpot}
+                            selected={
+                              heatmapSelection
+                                ? { thresholdIndex: heatmapSelection.thresholdIndex, dayIndex: heatmapSelection.dayIndex }
+                                : null
+                            }
+                            onSelect={handleHeatmapSelect}
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-white/60">
+                            No probability ladder available.
+                          </div>
+                        )}
+                      </Suspense>
+                    </EB>
+                  </div>
+                </Card>
+
                 <div id="targets-card" className="lg:col-span-1">
                   <TargetsAndOdds
-                    spot={art?.targets?.spot ?? currentPrice ?? 0}
+                    spot={heatmapSpot ?? art?.targets?.spot ?? currentPrice ?? 0}
                     horizonDays={art?.targets?.horizon_days ?? Number(horizon || 0)}
                     rows={ladderRows}
+                    highlightPrice={heatmapSelection?.threshold ?? null}
+                    highlightDay={heatmapSelection?.day ?? null}
+                    highlightProbability={heatmapSelection?.probability ?? null}
                   />
                 </div>
 
@@ -1341,6 +1823,9 @@ function DashboardApp({
                             prices={(art!.terminal_prices || []).filter(
                               (v): v is number => typeof v === "number" && Number.isFinite(v)
                             )}
+                            density={art?.terminal_density ?? null}
+                            scenarioMeta={Array.isArray(art?.terminal_meta) ? art?.terminal_meta : null}
+                            spot={heatmapSpot}
                           />
                         ) : (
                           <div className="text-xs text-white/60">No terminal distribution yet.</div>
@@ -1352,12 +1837,12 @@ function DashboardApp({
 
                 <Card
                   id="drivers-card"
-                  title="Drivers (Explainability)"
+                  title={driverSourceLabel ? `Drivers · ${driverSourceLabel}` : "Drivers (Explainability)"}
                   actions={
                     <CardMenu
                       items={[
-                        { label: "Focus", onClick: () => setFocus("drivers"), disabled: !drivers?.length },
-                        { label: "Export PNG", onClick: () => exportChart("drivers"), disabled: !drivers?.length },
+                        { label: "Focus", onClick: () => setFocus("drivers"), disabled: !displayDrivers.length },
+                        { label: "Export PNG", onClick: () => exportChart("drivers"), disabled: !displayDrivers.length },
                       ]}
                     />
                   }
@@ -1365,9 +1850,9 @@ function DashboardApp({
                   <div data-chart="drivers" className="h-64 md:h-80">
                     <EB>
                       <Suspense fallback={<ChartFallback />}>
-                        {drivers?.length ? (
+                        {displayDrivers.length ? (
                           <DriversWaterfall
-                            drivers={drivers.map((d) => ({
+                            drivers={displayDrivers.map((d) => ({
                               feature: d.feature,
                               weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0,
                             }))}
@@ -1377,6 +1862,11 @@ function DashboardApp({
                         )}
                       </Suspense>
                     </EB>
+                    {driverSourceLabel && (
+                      <div className="mt-2 text-[11px] text-white/60">
+                        Scenario focus: <span className="font-semibold text-white/80">{driverSourceLabel}</span>
+                      </div>
+                    )}
                   </div>
                 </Card>
 
@@ -1401,8 +1891,15 @@ function DashboardApp({
                 <Card id="scenarios-card" title="Scenarios" className="lg:col-span-2">
                   <EB>
                     <Suspense fallback={<ChartFallback />}>
-                      {art ? (
-                        <ScenarioTiles artifact={art} />
+                      {scenarios.length ? (
+                        <ScenarioTiles
+                          scenarios={scenarios}
+                          activeMap={activeScenarioMap}
+                          selectedId={selectedScenarioId}
+                          onToggle={handleScenarioToggle}
+                          onSelect={handleScenarioSelect}
+                          onReset={handleScenarioReset}
+                        />
                       ) : (
                         <div className="text-xs text-white/60">No scenarios available.</div>
                       )}
@@ -1434,7 +1931,7 @@ function DashboardApp({
                 <Card id="simetrix-ai">
                   <div className="mb-2 text-sm text-white/60">Simetrix AI</div>
                   {runId ? (
-                    <SimSummaryCard runId={runId} />
+                    <SimSummaryCard runId={runId} profile={effectiveProfile} />
                   ) : (
                     <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
                       Powered by xAI.
@@ -1470,14 +1967,24 @@ function DashboardApp({
       </EB>
 
       {/* Focus Overlay */}
-      <FocusOverlay open={!!focus} title={focus === "fan" ? "Price Forecast" : focus === "terminal" ? "Terminal Distribution" : focus === "drivers" ? "Drivers (Explainability)" : focus === "scenarios" ? "Scenarios" : ""} onClose={() => setFocus(null)}>
+      <FocusOverlay open={!!focus} title={focus === "fan" ? "Price Forecast" : focus === "terminal" ? "Terminal Distribution" : focus === "drivers" ? (driverSourceLabel ? `Drivers · ${driverSourceLabel}` : "Drivers (Explainability)") : focus === "scenarios" ? "Scenarios" : focus === "heatmap" ? "Touch Odds by Day" : ""} onClose={() => setFocus(null)}>
         <div className="h-[68vh]">
           <EB>
             <Suspense fallback={<ChartFallback />}> {
-              focus === "fan" ? (art ? <FanChart artifact={art} /> : <div className="text-xs text-white/60">Run a simulation to view.</div>) :
-              focus === "terminal" ? (Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? <TerminalDistribution prices={(art!.terminal_prices || []).filter((v): v is number => typeof v === "number" && Number.isFinite(v))} /> : <div className="text-xs text-white/60">No terminal distribution yet.</div>) :
-              focus === "drivers" ? (drivers?.length ? <DriversWaterfall drivers={drivers.map((d) => ({ feature: d.feature, weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0 }))} /> : <div className="text-xs text-white/60">No drivers yet.</div>) :
-              focus === "scenarios" ? (art ? <ScenarioTiles artifact={art} /> : <div className="text-xs text-white/60">-</div>) : null
+              focus === "fan" ? (art ? (
+                <div className="flex h-full flex-col">
+                  <div className="flex-1 min-h-0">
+                    <FanChart artifact={art} />
+                  </div>
+                  {diagnostics?.regimeTimeline?.length && fanHorizonDays > 0 && (
+                    <RegimeStrip horizonDays={fanHorizonDays} timeline={diagnostics.regimeTimeline} className="mt-4" />
+                  )}
+                </div>
+              ) : <div className="text-xs text-white/60">Run a simulation to view.</div>) :
+              focus === "terminal" ? (Array.isArray(art?.terminal_prices) && art!.terminal_prices.length ? <TerminalDistribution prices={(art!.terminal_prices || []).filter((v): v is number => typeof v === "number" && Number.isFinite(v))} density={art?.terminal_density ?? null} scenarioMeta={Array.isArray(art?.terminal_meta) ? art?.terminal_meta : null} spot={heatmapSpot} /> : <div className="text-xs text-white/60">No terminal distribution yet.</div>) :
+              focus === "drivers" ? (displayDrivers.length ? <DriversWaterfall drivers={displayDrivers.map((d) => ({ feature: d.feature, weight: typeof d.weight === "number" && Number.isFinite(d.weight) ? d.weight : 0 }))} /> : <div className="text-xs text-white/60">No drivers yet.</div>) :
+              focus === "scenarios" ? (scenarios.length ? <ScenarioTiles scenarios={scenarios} activeMap={activeScenarioMap} selectedId={selectedScenarioId} onToggle={handleScenarioToggle} onSelect={handleScenarioSelect} onReset={handleScenarioReset} /> : <div className="text-xs text-white/60">-</div>) :
+              focus === "heatmap" ? (heatmapData ? <ProbabilityHeatmap thresholds={heatmapData.thresholds} probsByDay={heatmapData.matrix} days={heatmapData.days} spot={heatmapSpot} selected={heatmapSelection ? { thresholdIndex: heatmapSelection.thresholdIndex, dayIndex: heatmapSelection.dayIndex } : null} onSelect={handleHeatmapSelect} /> : <div className="text-xs text-white/60">No probability ladder available.</div>) : null
             } </Suspense>
           </EB>
         </div>
@@ -1513,6 +2020,93 @@ function FocusOverlay({ open, title, onClose, children }: { open: boolean; title
       </div>
     </div>
   );
+}
+
+function RegimeStrip({
+  horizonDays,
+  timeline,
+  className,
+}: {
+  horizonDays: number;
+  timeline: Array<{ day: number; label: string | null; score: number | null }>;
+  className?: string;
+}) {
+  const horizon = Math.max(1, Number.isFinite(horizonDays) ? horizonDays : 0);
+  if (!timeline?.length || horizon <= 0) return null;
+  const sorted = [...timeline]
+    .filter((entry) => Number.isFinite(entry?.day))
+    .sort((a, b) => (a.day ?? 0) - (b.day ?? 0));
+  if (!sorted.length) return null;
+
+  const segments: Array<{ start: number; end: number; label: string | null; score: number | null }> = [];
+  let cursor = 0;
+  const clamp = (value: number) => Math.max(0, Math.min(horizon, value));
+  sorted.forEach((entry, idx) => {
+    const start = clamp(entry.day ?? 0);
+    if (start > cursor) {
+      segments.push({ start: cursor, end: start, label: null, score: null });
+    }
+    const nextDay =
+      idx + 1 < sorted.length ? clamp(sorted[idx + 1].day ?? start) : horizon;
+    const end = Math.max(start, nextDay);
+    segments.push({
+      start,
+      end,
+      label: entry.label ?? null,
+      score: entry.score ?? null,
+    });
+    cursor = end;
+  });
+  if (cursor < horizon) {
+    segments.push({ start: cursor, end: horizon, label: null, score: null });
+  }
+
+  const containerClass = className ? `${className} space-y-1` : "mt-3 space-y-1";
+
+  return (
+    <div className={containerClass}>
+      <div className="text-[10px] uppercase tracking-wide text-white/50">Regime strip</div>
+      <div className="flex h-5 overflow-hidden rounded-full border border-white/10 bg-black/40 text-[10px]">
+        {segments.map((seg, idx) => {
+          const length = Math.max(0.0001, seg.end - seg.start);
+          const fraction = length / horizon;
+          const labelText =
+            seg.label ?? (typeof seg.score === "number" && Number.isFinite(seg.score)
+              ? seg.score >= 0
+                ? "Risk-on"
+                : "Risk-off"
+              : "");
+          const showLabel = fraction > 0.18 && labelText;
+          const scoreText =
+            typeof seg.score === "number" && Number.isFinite(seg.score)
+              ? seg.score.toFixed(2)
+              : null;
+          return (
+            <div
+              key={`${seg.start}-${idx}`}
+              className="flex items-center justify-center overflow-hidden"
+              style={{
+                flex: `${length} 1 0%`,
+                backgroundColor: colorForRegimeScore(seg.score),
+              }}
+              title={`${labelText || "Regime"}${scoreText ? ` - ${scoreText}` : ""}`}
+            >
+              {showLabel && <span className="px-2 text-white/80">{labelText}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function colorForRegimeScore(score?: number | null) {
+  if (typeof score === "number" && Number.isFinite(score)) {
+    if (score >= 0.25) return "rgba(34,197,94,0.35)";
+    if (score <= -0.25) return "rgba(248,113,113,0.35)";
+    return "rgba(14,165,233,0.28)";
+  }
+  return "rgba(148,163,184,0.25)";
 }
 
 // ---- Utilities ----

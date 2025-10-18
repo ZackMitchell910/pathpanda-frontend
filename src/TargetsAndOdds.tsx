@@ -16,10 +16,16 @@ export default function TargetsAndOdds({
   spot,
   horizonDays,
   rows,
+  highlightPrice,
+  highlightDay,
+  highlightProbability,
 }: {
   spot: number;
   horizonDays: number;
   rows: LadderRow[];
+  highlightPrice?: number | null;
+  highlightDay?: number | null;
+  highlightProbability?: number | null;
 }) {
   const data = Array.isArray(rows) ? rows : [];
 
@@ -50,8 +56,15 @@ export default function TargetsAndOdds({
               </tr>
             )}
 
-            {data.map((r) => (
-              <tr key={`${r.label}-${r.price}`} className="hover:bg-white/5">
+            {data.map((r) => {
+              const isActive =
+                typeof highlightPrice === "number" &&
+                Math.abs(r.price - highlightPrice) < Math.max(0.01, r.price * 1e-3);
+              return (
+                <tr
+                  key={`${r.label}-${r.price}`}
+                  className={`hover:bg-white/5 ${isActive ? "bg-sky-500/15" : ""}`}
+                >
                 <td className="py-2 pe-3 text-white/90 whitespace-nowrap">{r.label}</td>
                 <td className="py-2 pe-3 tabular-nums">${Number(r.price).toFixed(2)}</td>
                 <td className="py-2 pe-3 tabular-nums">
@@ -64,7 +77,8 @@ export default function TargetsAndOdds({
                   {Number.isFinite(r.tMedDays as number) ? `D${Math.round(r.tMedDays as number)}` : "-"}
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>
@@ -73,6 +87,15 @@ export default function TargetsAndOdds({
       <div className="mt-3 text-[11px] text-white/60">
         Spot: <span className="font-mono text-white/80">${Number(spot).toFixed(2)}</span>
       </div>
+
+      {typeof highlightPrice === "number" && typeof highlightProbability === "number" && (
+        <div className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] text-sky-100">
+          Selected rung: <span className="font-semibold">${highlightPrice.toFixed(2)}</span>
+          {typeof highlightDay === "number" ? ` by D${highlightDay}` : ""}
+          {" -> "}
+          <span className="font-semibold">{fmtPct(highlightProbability)}</span>
+        </div>
+      )}
     </section>
   );
 }

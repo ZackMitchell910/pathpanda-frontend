@@ -33,7 +33,7 @@ type StatusHelpers = {
   api: (path: string) => string;
   headers: Record<string, string>;
   polygonKey: string;
-  simKey: string;
+  ptKey: string;
   onUnauthorized: () => void;
 };
 
@@ -59,10 +59,10 @@ const statusDefinitions: StatusDefinition[] = [
     },
   },
   {
-    id: "simetrix-key",
-    label: "Simetrix API key",
-    check: async ({ simKey }) => {
-      const normalized = (simKey ?? "").trim();
+    id: "pt-key",
+    label: "PT API key",
+    check: async ({ ptKey }) => {
+      const normalized = (ptKey ?? "").trim();
       return normalized.length
         ? { status: "ok", detail: `${normalized.slice(0, 6)}...` }
         : { status: "warn", detail: "Missing API key (set via Admin portal)." };
@@ -199,7 +199,7 @@ const STATUS_ICON: Record<StatusState, JSX.Element> = {
 
 export default function AdminDashboard() {
   const apiBase = useMemo(() => resolveApiBase(), []);
-  const [simKey, setSimKey] = useState(() => resolveApiKey() ?? "");
+  const [ptKey, setPtKey] = useState(() => resolveApiKey() ?? "");
   const [polygonKey, setPolygonKey] = useState(() => {
     if (typeof window === "undefined") return "";
     return (
@@ -219,9 +219,9 @@ export default function AdminDashboard() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [simEditorOpen, setSimEditorOpen] = useState(false);
+  const [ptEditorOpen, setPtEditorOpen] = useState(false);
   const [polygonEditorOpen, setPolygonEditorOpen] = useState(false);
-  const [simKeyDraft, setSimKeyDraft] = useState(simKey ?? "");
+  const [ptKeyDraft, setPtKeyDraft] = useState(ptKey ?? "");
   const [polygonKeyDraft, setPolygonKeyDraft] = useState(polygonKey ?? "");
 
   const handleUnauthorized = useCallback(() => {
@@ -273,13 +273,13 @@ export default function AdminDashboard() {
     [api, authForm.username, authForm.password]
   );
 
-  const toggleSimEditor = useCallback(() => {
-    setSimEditorOpen((prev) => {
+  const togglePtEditor = useCallback(() => {
+    setPtEditorOpen((prev) => {
       const next = !prev;
-      if (!prev) setSimKeyDraft(simKey ?? "");
+      if (!prev) setPtKeyDraft(ptKey ?? "");
       return next;
     });
-  }, [simKey]);
+  }, [ptKey]);
 
   const togglePolygonEditor = useCallback(() => {
     setPolygonEditorOpen((prev) => {
@@ -289,33 +289,34 @@ export default function AdminDashboard() {
     });
   }, [polygonKey]);
 
-  const handleCancelSimKey = useCallback(() => {
-    setSimEditorOpen(false);
-    setSimKeyDraft(simKey ?? "");
-  }, [simKey]);
+  const handleCancelPtKey = useCallback(() => {
+    setPtEditorOpen(false);
+    setPtKeyDraft(ptKey ?? "");
+  }, [ptKey]);
 
   const handleCancelPolygonKey = useCallback(() => {
     setPolygonEditorOpen(false);
     setPolygonKeyDraft(polygonKey ?? "");
   }, [polygonKey]);
 
-  const handleSaveSimKey = useCallback(() => {
-    const trimmed = simKeyDraft.trim();
+  const handleSavePtKey = useCallback(() => {
+    const trimmed = ptKeyDraft.trim();
     try {
       if (typeof window !== "undefined") {
         if (trimmed) {
-          window.localStorage?.setItem("smx_api_key", trimmed);
+          window.localStorage?.setItem("pt_api_key", trimmed);
         } else {
-          window.localStorage?.removeItem("smx_api_key");
+          window.localStorage?.removeItem("pt_api_key");
         }
+        window.localStorage?.removeItem("smx_api_key");
       }
-      setSimKey(trimmed);
-      toast.success(trimmed ? "Simetrix API key saved." : "Simetrix API key cleared.");
-      setSimEditorOpen(false);
+      setPtKey(trimmed);
+      toast.success(trimmed ? "PT API key saved." : "PT API key cleared.");
+      setPtEditorOpen(false);
     } catch (error: any) {
       toast.error(error?.message || String(error));
     }
-  }, [simKeyDraft]);
+  }, [ptKeyDraft]);
 
   const handleSavePolygonKey = useCallback(() => {
     const trimmed = polygonKeyDraft.trim();
@@ -336,10 +337,10 @@ export default function AdminDashboard() {
   }, [polygonKeyDraft]);
 
   useEffect(() => {
-    if (!simEditorOpen) {
-      setSimKeyDraft(simKey ?? "");
+    if (!ptEditorOpen) {
+      setPtKeyDraft(ptKey ?? "");
     }
-  }, [simKey, simEditorOpen]);
+  }, [ptKey, ptEditorOpen]);
 
   useEffect(() => {
     if (!polygonEditorOpen) {
@@ -352,11 +353,11 @@ export default function AdminDashboard() {
       Accept: "application/json",
       "Content-Type": "application/json",
     };
-    if (simKey && simKey.trim()) {
-      baseHeaders["X-API-Key"] = simKey.trim();
+    if (ptKey && ptKey.trim()) {
+      baseHeaders["X-API-Key"] = ptKey.trim();
     }
     return baseHeaders;
-  }, [simKey]);
+  }, [ptKey]);
 
   const [statuses, setStatuses] = useState<StatusResult[]>(
     statusDefinitions.map(({ id, label, optional }) => ({
@@ -378,7 +379,7 @@ export default function AdminDashboard() {
       api,
       headers,
       polygonKey,
-      simKey,
+      ptKey,
       onUnauthorized: handleUnauthorized,
     };
     setStatuses((prev) =>
@@ -419,13 +420,13 @@ export default function AdminDashboard() {
       }
     }
     setStatuses(results);
-  }, [apiBase, api, headers, polygonKey, simKey, handleUnauthorized, isAuthenticated]);
+  }, [apiBase, api, headers, polygonKey, ptKey, handleUnauthorized, isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {
       refreshStatuses();
     }
-  }, [refreshStatuses, isAuthenticated, simKey, polygonKey]);
+  }, [refreshStatuses, isAuthenticated, ptKey, polygonKey]);
 
   const downloadReport = async (report: ReportDefinition) => {
     if (!apiBase) {
@@ -524,9 +525,9 @@ export default function AdminDashboard() {
     );
   }
 
-  const simKeyNormalized = simKey ?? "";
+  const ptKeyNormalized = ptKey ?? "";
   const polygonKeyNormalized = polygonKey ?? "";
-  const simKeyDirty = simKeyDraft.trim() !== simKeyNormalized.trim();
+  const ptKeyDirty = ptKeyDraft.trim() !== ptKeyNormalized.trim();
   const polygonKeyDirty = polygonKeyDraft.trim() !== polygonKeyNormalized.trim();
 
   return (
@@ -556,9 +557,9 @@ export default function AdminDashboard() {
           <Card>
             <CardContent className="grid gap-4 p-4 md:p-6">
               {statuses.map((status) => {
-                const isSimKey = status.id === "simetrix-key";
+                const isPtKey = status.id === "pt-key";
                 const isPolygonKey = status.id === "polygon-key";
-                const isEditorOpen = isSimKey ? simEditorOpen : isPolygonKey ? polygonEditorOpen : false;
+                const isEditorOpen = isPtKey ? ptEditorOpen : isPolygonKey ? polygonEditorOpen : false;
                 const statusMessage =
                   status.status === "checking"
                     ? "Checking..."
@@ -585,9 +586,9 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-white/40">{statusMessage}</span>
-                        {(isSimKey || isPolygonKey) && (
+                        {(isPtKey || isPolygonKey) && (
                           <button
-                            onClick={isSimKey ? toggleSimEditor : togglePolygonEditor}
+                            onClick={isPtKey ? togglePtEditor : togglePolygonEditor}
                             className="rounded-lg border border-white/15 bg-black/40 px-2 py-1 text-xs text-white/70 transition hover:bg-white/10"
                           >
                             {isEditorOpen ? "Close" : "Edit"}
@@ -595,29 +596,29 @@ export default function AdminDashboard() {
                         )}
                       </div>
                     </div>
-                    {isSimKey && simEditorOpen && (
+                    {isPtKey && ptEditorOpen && (
                       <div className="mt-4 space-y-3 rounded-lg border border-white/10 bg-black/50 p-4">
                         <label className="block text-xs font-medium text-white/60" htmlFor="admin-sim-key">
-                          Simetrix API key
+                          PT API key
                         </label>
                         <input
                           id="admin-sim-key"
-                          value={simKeyDraft}
-                          onChange={(event) => setSimKeyDraft(event.target.value)}
+                          value={ptKeyDraft}
+                          onChange={(event) => setPtKeyDraft(event.target.value)}
                           className="w-full rounded-lg border border-white/20 bg-black/40 px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                          placeholder="SIMETRIX_API_KEY"
+                          placeholder="PT_API_KEY"
                           autoComplete="off"
                         />
                         <div className="flex gap-2">
                           <button
-                            onClick={handleSaveSimKey}
-                            disabled={!simKeyDirty}
+                            onClick={handleSavePtKey}
+                            disabled={!ptKeyDirty}
                             className="inline-flex items-center gap-2 rounded-lg bg-emerald-500/80 px-3 py-1.5 text-sm text-black transition hover:bg-emerald-400 disabled:opacity-50"
                           >
                             Save
                           </button>
                           <button
-                            onClick={handleCancelSimKey}
+                            onClick={handleCancelPtKey}
                             className="inline-flex items-center gap-2 rounded-lg border border-white/15 bg-transparent px-3 py-1.5 text-sm text-white/70 transition hover:bg-white/10"
                           >
                             Cancel
